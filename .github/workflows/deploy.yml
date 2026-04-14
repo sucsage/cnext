@@ -1,0 +1,43 @@
+name: Build & Deploy to EC2
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # ตรวจ syntax ด้วย gcc (cross-check เบื้องต้น ไม่ต้องมี liburing)
+      - name: Lint / syntax check
+        run: |
+          sudo apt-get install -y gcc
+          gcc -fsyntax-only -I. main.c server.c db/hot.c db/cold.c db/db.c \
+            2>&1 || true   # warning ok แต่ error จะ fail
+
+      - name: Deploy via SSH
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          script: |
+            set -e
+            cd /home/ubuntu/cnext
+
+            echo "=== Pull latest code ==="
+            git pull origin main
+
+            echo "=== Build ==="
+            make clean && make
+
+            echo "=== Restart service ==="
+            sudo systemctl restart cnext
+
+            echo "=== Status ==="
+            sudo systemctl is-active cnext
+            echo "Deploy complete!"

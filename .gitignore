@@ -1,0 +1,16 @@
+# Compiled binary
+server
+
+# LMDB runtime data (สร้างใหม่อัตโนมัติบน EC2)
+data/
+
+# SSH Keys — ห้ามขึ้น Git เด็ดขาด
+*.pem
+*.key
+*.p12
+
+# Claude Code local settings
+.claude/
+
+# macOS
+.DS_Store

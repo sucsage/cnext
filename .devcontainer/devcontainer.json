@@ -1,0 +1,15 @@
+{
+    "name": "C Edge Server",
+    "build": {
+        "dockerfile": "../Dockerfile",
+        "target": "builder"   // ใช้ build stage ที่มี gcc + liburing-dev ครบ
+    },
+    "forwardPorts": [8080],
+    "customizations": {
+        "vscode": {
+            "extensions": [
+                "ms-vscode.cpptools"
+            ]
+        }
+    }
+}
