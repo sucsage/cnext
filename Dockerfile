@@ -2,7 +2,7 @@
 FROM ubuntu:24.04 AS builder
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    build-essential git ca-certificates liblmdb-dev \
+    build-essential git ca-certificates liblmdb-dev libnghttp2-dev \
     && rm -rf /var/lib/apt/lists/*
 
 # Build liburing จาก source เพื่อให้ได้ recv_fixed / send_fixed
@@ -20,16 +20,23 @@ RUN mkdir -p data && make clean && make
 FROM ubuntu:24.04
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    liblmdb0 \
+    liblmdb0 libnghttp2-14 \
     && rm -rf /var/lib/apt/lists/*
 
-# copy liburing .so จาก builder (ไม่ต้อง build ซ้ำ)
+# copy liburing .so จาก builder
 COPY --from=builder /usr/local/lib/liburing.so.2   /usr/local/lib/
 COPY --from=builder /usr/local/lib/liburing.so.2.6 /usr/local/lib/
 RUN ldconfig
 
 WORKDIR /app
+
+# binary
 COPY --from=builder /app/server .
+
+# assets ที่ server อ่านตอน runtime (lib/ และ src/ เป็น compile-time เท่านั้น)
+COPY --from=builder /app/layouts/ ./layouts/
+COPY --from=builder /app/public/  ./public/
+
 RUN mkdir -p data
 
 EXPOSE 8080

@@ -256,6 +256,57 @@ char *cold_get(const char *ns, const char *key) {
 }
 
 // =====================================================================
+// Scan (sync read-only cursor)
+// =====================================================================
+int cold_scan(const char *ns,
+              void (*cb)(const char *key, const char *val, void *ctx),
+              void *ctx) {
+    MDB_txn *txn;
+    if (mdb_txn_begin(env, NULL, MDB_RDONLY, &txn) != MDB_SUCCESS)
+        return -1;
+
+    MDB_dbi dbi;
+    if (mdb_dbi_open(txn, ns, 0, &dbi) != MDB_SUCCESS) {
+        mdb_txn_abort(txn);
+        return 0;   // namespace ว่าง = ไม่ใช่ error
+    }
+
+    MDB_cursor *cur;
+    if (mdb_cursor_open(txn, dbi, &cur) != MDB_SUCCESS) {
+        mdb_txn_abort(txn);
+        return -1;
+    }
+
+    MDB_val k, v;
+    int count = 0;
+    char key_buf[MAX_KEY];
+
+    while (mdb_cursor_get(cur, &k, &v, MDB_NEXT) == MDB_SUCCESS) {
+        size_t klen = k.mv_size < MAX_KEY - 1 ? k.mv_size : MAX_KEY - 1;
+        memcpy(key_buf, k.mv_data, klen);
+        key_buf[klen] = '\0';
+
+        // val ชี้ตรงไปที่ mmap — valid ตลอด txn, ไม่ต้อง malloc
+        char *val = (char *)v.mv_data;
+        char  saved = val[v.mv_size];   // เก็บ byte หลัง val ไว้
+        // LMDB mmap ไม่รับประกัน null-terminator → ต้อง copy
+        char *val_copy = malloc(v.mv_size + 1);
+        if (val_copy) {
+            memcpy(val_copy, val, v.mv_size);
+            val_copy[v.mv_size] = '\0';
+            cb(key_buf, val_copy, ctx);
+            free(val_copy);
+            count++;
+        }
+        (void)saved;
+    }
+
+    mdb_cursor_close(cur);
+    mdb_txn_abort(txn);
+    return count;
+}
+
+// =====================================================================
 // Sync (force flush to disk)
 // =====================================================================
 void cold_sync(void) {

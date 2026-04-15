@@ -1,0 +1,245 @@
+/* ============================================================
+   cnext — global styles
+   ============================================================ */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --bg:      #0a0a0a;
+  --surface: #111111;
+  --border:  #1e1e1e;
+  --text:    #e8e8e8;
+  --muted:   #666;
+  --accent:  #7c6aff;
+  --accent2: #a78bfa;
+  --green:   #22c55e;
+  --radius:  10px;
+  --font:    -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+}
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font);
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+/* ── Navbar ── */
+.navbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 2rem;
+  height: 56px;
+  border-bottom: 1px solid var(--border);
+  position: sticky;
+  top: 0;
+  background: rgba(10,10,10,.85);
+  backdrop-filter: blur(12px);
+  z-index: 100;
+}
+
+.logo {
+  font-weight: 700;
+  font-size: 1.1rem;
+  color: var(--accent2);
+  text-decoration: none;
+  letter-spacing: .03em;
+}
+
+.nav-links { display: flex; gap: 1.5rem; }
+.nav-links a {
+  color: var(--muted);
+  text-decoration: none;
+  font-size: .9rem;
+  transition: color .15s;
+}
+.nav-links a:hover { color: var(--text); }
+
+/* ── Main ── */
+main {
+  flex: 1;
+  max-width: 860px;
+  width: 100%;
+  margin: 0 auto;
+  padding: 3rem 1.5rem;
+}
+
+/* ── Footer ── */
+.footer {
+  text-align: center;
+  padding: 1.5rem;
+  font-size: .8rem;
+  color: var(--muted);
+  border-top: 1px solid var(--border);
+}
+
+/* ============================================================
+   Hero (index page)
+   ============================================================ */
+.hero { text-align: center; padding: 2rem 0 3rem; }
+
+.hero-badge {
+  display: inline-block;
+  font-size: .75rem;
+  font-weight: 600;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+  color: var(--accent);
+  border: 1px solid var(--accent);
+  border-radius: 999px;
+  padding: .25rem .75rem;
+  margin-bottom: 1.5rem;
+}
+
+.hero-title {
+  font-size: clamp(3rem, 8vw, 5.5rem);
+  font-weight: 800;
+  letter-spacing: -.03em;
+  background: linear-gradient(135deg, #fff 30%, var(--accent2));
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  line-height: 1.1;
+  margin-bottom: .75rem;
+}
+
+.hero-sub {
+  color: var(--muted);
+  font-size: 1rem;
+  margin-bottom: 3rem;
+}
+
+.tech-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: 1rem;
+  margin-bottom: 2.5rem;
+}
+
+.tech-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 1.25rem 1rem;
+  transition: border-color .2s, transform .2s;
+}
+.tech-card:hover { border-color: var(--accent); transform: translateY(-2px); }
+
+.tech-icon  { font-size: 1.5rem; margin-bottom: .5rem; }
+.tech-name  { font-weight: 600; font-size: .95rem; margin-bottom: .25rem; }
+.tech-desc  { font-size: .8rem; color: var(--muted); }
+
+.cta-row { display: flex; gap: 1rem; justify-content: center; flex-wrap: wrap; }
+
+/* ============================================================
+   Buttons
+   ============================================================ */
+.btn-primary, .btn-secondary {
+  display: inline-flex;
+  align-items: center;
+  gap: .4rem;
+  padding: .6rem 1.4rem;
+  border-radius: var(--radius);
+  font-size: .9rem;
+  font-weight: 600;
+  cursor: pointer;
+  text-decoration: none;
+  border: none;
+  transition: opacity .15s, transform .1s;
+}
+.btn-primary:hover, .btn-secondary:hover { opacity: .85; transform: translateY(-1px); }
+.btn-primary:active, .btn-secondary:active { transform: translateY(0); }
+
+.btn-primary  { background: var(--accent); color: #fff; }
+.btn-secondary {
+  background: transparent;
+  color: var(--text);
+  border: 1px solid var(--border);
+}
+button:disabled { opacity: .5; cursor: not-allowed; }
+
+/* ============================================================
+   Page (inner pages)
+   ============================================================ */
+.page-header {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  margin-bottom: 1.75rem;
+}
+.page-header h1 { font-size: 1.75rem; font-weight: 700; }
+
+.badge {
+  background: var(--accent);
+  color: #fff;
+  font-size: .75rem;
+  font-weight: 700;
+  padding: .2rem .6rem;
+  border-radius: 999px;
+  min-width: 1.5rem;
+  text-align: center;
+}
+
+/* Create form */
+.create-form {
+  display: flex;
+  gap: .75rem;
+  margin-bottom: 2rem;
+}
+.create-form input {
+  flex: 1;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text);
+  padding: .6rem 1rem;
+  font-size: .9rem;
+  outline: none;
+  transition: border-color .2s;
+}
+.create-form input:focus { border-color: var(--accent); }
+
+/* User list */
+.user-list { display: flex; flex-direction: column; gap: .75rem; }
+
+.user-card {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: .9rem 1.25rem;
+  transition: border-color .2s;
+  animation: fadeIn .2s ease;
+}
+.user-card:hover { border-color: var(--border); }
+
+@keyframes fadeIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; } }
+
+.user-avatar {
+  width: 36px; height: 36px;
+  background: linear-gradient(135deg, var(--accent), var(--accent2));
+  border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  font-weight: 700; font-size: .9rem; color: #fff;
+  flex-shrink: 0;
+}
+
+.user-info { display: flex; flex-direction: column; gap: .1rem; }
+.user-info strong { font-size: .95rem; }
+.user-info small  { font-size: .8rem; color: var(--muted); }
+
+/* Skeleton loader */
+.skeleton {
+  height: 58px;
+  background: linear-gradient(90deg, var(--surface) 25%, var(--border) 50%, var(--surface) 75%);
+  background-size: 200% 100%;
+  border-radius: var(--radius);
+  animation: shimmer 1.4s infinite;
+}
+@keyframes shimmer { to { background-position: -200% 0; } }
+
+.error { color: #f87171; font-size: .9rem; padding: 1rem; }

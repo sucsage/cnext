@@ -17,6 +17,13 @@ int   cold_del(const char *ns, const char *key);
 // คืน NULL ถ้าไม่เจอ
 char *cold_get(const char *ns, const char *key);
 
+// Scan ทุก key-value ใน namespace (sync, read-only txn)
+// cb ถูกเรียกทุก entry — key/val valid แค่ใน cb (อย่า keep pointer ไว้)
+// คืน จำนวน entries ที่ scan, -1 ถ้า error
+int   cold_scan(const char *ns,
+                void (*cb)(const char *key, const char *val, void *ctx),
+                void *ctx);
+
 // Force flush ลง disk (ใช้ตอน shutdown หรือ checkpoint)
 void  cold_sync(void);
 

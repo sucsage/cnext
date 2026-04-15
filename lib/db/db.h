@@ -38,6 +38,18 @@ int   db_del(const char *ns, const char *key);
 // กำหนดอายุ (วินาที) สำหรับ hot tier — ใช้หลัง db_put(DB_HOT/DB_BOTH, ...)
 int   db_ttl(const char *ns, const char *key, int seconds);
 
+// Scan ทุก entries ใน cold tier สำหรับ namespace
+// cb(key, val, ctx) — val เป็น null-terminated string, valid แค่ใน cb
+// คืน จำนวน entries, -1 ถ้า error
+int   db_scan(const char *ns,
+              void (*cb)(const char *key, const char *val, void *ctx),
+              void *ctx);
+
+// คืน JSON array "[v1,v2,...]" ของทุก value ใน namespace
+// hot cache hit → return ทันที, miss → scan cold แล้ว warm cache
+// malloc copy — caller ต้อง free()
+char *db_list(const char *ns);
+
 // Force flush cold store ลง disk
 void  db_sync(void);
 
