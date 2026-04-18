@@ -181,6 +181,33 @@ docker run --rm -p 8080:8080 \
 
 ---
 
+## Build Modes
+
+The framework ships the library as a prebuilt static archive so `lib/*.c` stays private.
+
+| Mode | When | How `make` resolves `libcnext.a` |
+|------|------|----------------------------------|
+| **source** | `lib/` present on disk (dev machine) | Compile `lib/*.c` → `libcnext.a` |
+| **consumer** | `lib/` absent (EC2, GitHub clone, CI) | Link `plib/libcnext.a` with `-Iplib/include` |
+
+`lib/` is gitignored — it is never pushed to GitHub. `plib/libcnext.a` + `plib/include/` is what the public repo ships.
+
+### Dev workflow (push to GitHub)
+
+```bash
+# 1. edit lib/*.c
+# 2. refresh the published artifact
+make plib-pack          # Linux
+make pack-docker        # macOS (uses docker buildx)
+# 3. commit plib/ and push
+git add plib src lib_or_whatever
+git commit && git push
+```
+
+The GitHub Action verifies `plib/libcnext.a` exists before deploy — forgetting `pack` fails the build.
+
+---
+
 ## Project Structure
 
 ```
@@ -193,7 +220,7 @@ src/
     action.c            → POST /action/path/create
     action_delete.c     → POST /action/path/delete
 
-lib/
+lib/                    (gitignored — private source)
   server.h / server.c   io_uring HTTP server + HTTP/1.1
   pages.h / pages.c     page engine
   h2.c                  HTTP/2 via nghttp2
@@ -203,6 +230,10 @@ lib/
     db.h / db.c         two-tier API
     hot.h / hot.c       RAM cache (hash table)
     cold.h / cold.c     LMDB async writer
+
+plib/                   (public artifact — committed)
+  libcnext.a            prebuilt static library
+  include/              public headers (mirror of lib/*.h)
 
 tools/
   cxnc                  .cxn → .c compiler (Python)

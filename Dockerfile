@@ -15,17 +15,20 @@ RUN git clone --depth 1 --branch liburing-2.6 \
 
 WORKDIR /app
 COPY . .
-RUN mkdir -p data && make clean && make
+# Build binary; in source mode also refresh plib/ so libonly stage stays fresh
+RUN mkdir -p data && make clean && make \
+ && if [ -f lib/server.c ]; then make plib-pack; fi
 
-# ── Lib Stage — export libcnext.a + headers ───────────────────────────
-# docker build --target=libonly -t cnext-lib .
-# docker create --name _lib cnext-lib
-# docker cp _lib:/dist/. ./dist && docker rm _lib
-FROM ubuntu:24.04 AS libonly
-WORKDIR /dist
-COPY --from=builder /app/libcnext.a .
-COPY --from=builder /app/lib/*.h    include/
-COPY --from=builder /app/lib/db/*.h include/db/
+# ── Lib Stage — export libcnext.a + headers from plib/ ────────────────
+# Recommended (buildx):
+#   docker buildx build --target=libonly -o type=local,dest=plib .
+# Or via classic build:
+#   docker build --target=libonly -t cnext-lib .
+#   docker create --name _lib cnext-lib
+#   docker cp _lib:/dist/. ./plib && docker rm _lib
+FROM scratch AS libonly
+COPY --from=builder /app/plib/libcnext.a /libcnext.a
+COPY --from=builder /app/plib/include    /include
 
 # ── Runtime Stage ─────────────────────────────────────────────────────
 FROM ubuntu:24.04

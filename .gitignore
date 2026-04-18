@@ -1,9 +1,18 @@
 # Compiled binary
 server
 
+# Private library source — plib/libcnext.a is the published artifact
+lib/
+
+# Artifacts built during source-mode builds (plib/libcnext.a is committed)
+libcnext.a
+lib/*.o
+
+# Generated from .cxn at build time
+src/**/*_cxn.c
+
 # LMDB runtime data (สร้างใหม่อัตโนมัติบน EC2)
 data/
-lib/
 .devcontainer/
 
 # SSH Keys — ห้ามขึ้น Git เด็ดขาด
