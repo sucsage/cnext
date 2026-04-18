@@ -9,6 +9,7 @@
 <body>
   <nav class="navbar">
     <a href="/" class="logo">cnext</a>
+    <a href="/cxn" class="logo">cxn</a>
   </nav>
   <main>
 {{children}}

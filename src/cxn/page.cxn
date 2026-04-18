@@ -1,0 +1,267 @@
+<!-- src/cxn/page.cxn  →  GET /cxn   (route derived from folder path) -->
+<%inc <time.h> %>
+<%inc <stdlib.h> %>
+
+<%!
+/* ── File-scope helpers live here. Everything between <%! and %> is
+   pasted as-is into the generated .c, OUTSIDE render(). Perfect for
+   static tables, callbacks passed to db_scan(), or per-file state. */
+static const char *CXN_DIRECTIVES[] = {
+    "<%inc file.h %>",
+    "<%! ... %>",
+    "<% c_code; %>",
+    "{{expr}}",
+    "{{children}}",
+    "@route /override",
+    "@fn helper_name",
+    NULL,
+};
+
+static void render_directive_row(const char *d, PageCtx *ctx) {
+    page_writef(ctx, "<li><code>%s</code></li>", d);
+}
+%>
+
+<div class="docs-layout">
+
+  <aside class="docs-sidebar">
+    <div class="docs-nav-group">.cxn Guide</div>
+    <a href="#what"       class="docs-nav-link">What is .cxn</a>
+    <a href="#pipeline"   class="docs-nav-link">Build Pipeline</a>
+    <div class="docs-nav-group">Directives</div>
+    <a href="#html"       class="docs-nav-link">Plain HTML</a>
+    <a href="#expr"       class="docs-nav-link">&#123;&#123;expr&#125;&#125;</a>
+    <a href="#code"       class="docs-nav-link">&lt;% code %&gt;</a>
+    <a href="#scope"      class="docs-nav-link">&lt;%! file scope %&gt;</a>
+    <a href="#inc"        class="docs-nav-link">&lt;%inc %&gt;</a>
+    <a href="#route"      class="docs-nav-link">@route</a>
+    <a href="#fn"         class="docs-nav-link">@fn</a>
+    <a href="#layout"     class="docs-nav-link">layout &amp; children</a>
+    <div class="docs-nav-group">Patterns</div>
+    <a href="#db"         class="docs-nav-link">Loop with db_scan</a>
+    <a href="#cond"       class="docs-nav-link">Conditionals</a>
+    <a href="#escape"     class="docs-nav-link">Escaping</a>
+    <a href="#gotchas"    class="docs-nav-link">Gotchas</a>
+  </aside>
+
+  <div class="docs-content">
+
+    <!-- ═════════════════════════════════════════════════════════════ -->
+    <div class="docs-section" id="what">
+      <h1 class="docs-title">Writing .cxn</h1>
+      <p class="docs-lead">A <code>.cxn</code> file is HTML with embedded C. <code>tools/cxnc</code> compiles it to a <code>.c</code> file at build time &mdash; so everything becomes static machine code. No runtime template parsing.</p>
+
+      <p class="docs-p">Below is the entire syntax in one demo. Each block is rendered live below its source.</p>
+    </div>
+
+    <!-- ═════════════════════════════════════════════════════════════ -->
+    <div class="docs-section" id="pipeline">
+      <h2 class="docs-h2">Build Pipeline</h2>
+      <p class="docs-p">Your source → generated C → object file → linked into <code>./server</code>:</p>
+      <div class="code-block">src/cxn/page.cxn
+  │  tools/cxnc (Python)
+  ▼
+.cnext/src/cxn/page_cxn.c
+  │  gcc -O3 -march=native
+  ▼
+./server   ← single binary, no template engine at runtime</div>
+      <p class="docs-p">Render time for this page right now: <strong>{{__cxn_build_ts()}}</strong> (server build timestamp).</p>
+    </div>
+
+    <!-- ═════════════════════════════════════════════════════════════ -->
+    <div class="docs-section" id="html">
+      <h2 class="docs-h2">Plain HTML</h2>
+      <p class="docs-p">Anything that isn&rsquo;t a directive is static HTML. Consecutive HTML lines are coalesced into a single <code>page_write_n</code> call with a compile-time <code>sizeof</code> length &mdash; zero <code>strlen</code> at runtime.</p>
+      <div class="code-block">&lt;h1&gt;Hello&lt;/h1&gt;
+&lt;p&gt;Static text&lt;/p&gt;</div>
+      <p class="docs-sublabel">Renders as:</p>
+      <div class="demo-box">
+        <h3 style="margin:0 0 4px">Hello</h3>
+        <p style="margin:0">Static text</p>
+      </div>
+    </div>
+
+    <!-- ═════════════════════════════════════════════════════════════ -->
+    <div class="docs-section" id="expr">
+      <h2 class="docs-h2">&#123;&#123;expr&#125;&#125; &mdash; inline expressions</h2>
+      <p class="docs-p">Compiles to <code>page_writef(ctx, "%s", expr)</code>. <code>expr</code> must be a C expression returning <code>const char *</code>.</p>
+      <div class="code-block">&lt;p&gt;User: &#123;&#123;req-&gt;path&#125;&#125;&lt;/p&gt;
+&lt;p&gt;Env: &#123;&#123;getenv("USER") ? getenv("USER") : "(none)"&#125;&#125;&lt;/p&gt;</div>
+      <p class="docs-sublabel">Live:</p>
+      <div class="demo-box">
+        <p style="margin:0">Current request path: <code>{{req->path}}</code></p>
+        <p style="margin:4px 0 0">Server user: <code>{{getenv("USER") ? getenv("USER") : "(none)"}}</code></p>
+      </div>
+      <p class="docs-note">Need an integer or formatted value? Use <code>&lt;% page_writef(ctx, "%d", n); %&gt;</code> instead.</p>
+    </div>
+
+    <!-- ═════════════════════════════════════════════════════════════ -->
+    <div class="docs-section" id="code">
+      <h2 class="docs-h2">&lt;% code %&gt; &mdash; C inside render()</h2>
+      <p class="docs-p">Raw C pasted inside the page&rsquo;s <code>render()</code> function. Use <code>ctx</code> (the <code>PageCtx *</code>) and <code>req</code> (the <code>HttpRequest *</code>) freely.</p>
+      <div class="code-block">&lt;% int n = 3; %&gt;
+&lt;ul&gt;
+  &lt;% for (int i = 1; i &lt;= n; i++) page_writef(ctx, "&lt;li&gt;row %d&lt;/li&gt;", i); %&gt;
+&lt;/ul&gt;</div>
+      <p class="docs-sublabel">Live:</p>
+      <div class="demo-box">
+        <% int n = 3; %>
+        <ul style="margin:0;padding-left:20px">
+          <% for (int i = 1; i <= n; i++) page_writef(ctx, "<li>row %d</li>", i); %>
+        </ul>
+      </div>
+      <p class="docs-note">The whole <code>&lt;% ... %&gt;</code> must fit on one line. For multi-line C, use <code>&lt;%! ... %&gt;</code> (file scope) or just split into many single-line blocks.</p>
+    </div>
+
+    <!-- ═════════════════════════════════════════════════════════════ -->
+    <div class="docs-section" id="scope">
+      <h2 class="docs-h2">&lt;%! ... %&gt; &mdash; file-scope C</h2>
+      <p class="docs-p">Multi-line C pasted <em>outside</em> <code>render()</code>. Close with <code>%&gt;</code> on its own line. Perfect for <code>static</code> helpers, callbacks, or tables.</p>
+      <div class="code-block">&lt;%!
+static const char *COLORS[] = { "red", "green", "blue" };
+
+static void swatch(PageCtx *ctx, const char *c) {
+    page_writef(ctx, "&lt;span style='background:%s'&gt;&lt;/span&gt;", c);
+}
+%&gt;
+
+&lt;% for (int i = 0; i &lt; 3; i++) swatch(ctx, COLORS[i]); %&gt;</div>
+      <p class="docs-sublabel">This page&rsquo;s file scope defines <code>CXN_DIRECTIVES[]</code> and <code>render_directive_row()</code>. Live output:</p>
+      <div class="demo-box">
+        <ul style="margin:0;padding-left:20px">
+          <% for (int i = 0; CXN_DIRECTIVES[i]; i++) render_directive_row(CXN_DIRECTIVES[i], ctx); %>
+        </ul>
+      </div>
+    </div>
+
+    <!-- ═════════════════════════════════════════════════════════════ -->
+    <div class="docs-section" id="inc">
+      <h2 class="docs-h2">&lt;%inc %&gt; &mdash; includes</h2>
+      <p class="docs-p">Emits a <code>#include</code> at the top of the generated <code>.c</code>. Two forms:</p>
+      <div class="code-block">&lt;%inc db/db.h %&gt;      → #include "db/db.h"
+&lt;%inc &lt;stdlib.h&gt; %&gt;   → #include &lt;stdlib.h&gt;</div>
+      <p class="docs-p">This page uses <code>&lt;%inc &lt;time.h&gt; %&gt;</code> and <code>&lt;%inc &lt;stdlib.h&gt; %&gt;</code> at the top.</p>
+    </div>
+
+    <!-- ═════════════════════════════════════════════════════════════ -->
+    <div class="docs-section" id="route">
+      <h2 class="docs-h2">@route &mdash; override the derived route</h2>
+      <p class="docs-p">By default the route is derived from the file path. <code>@route</code> overrides it.</p>
+      <div class="code-block">&lt;!-- src/marketing/page.cxn --&gt;
+&#64;route /promo/spring
+
+&lt;h1&gt;Spring sale&lt;/h1&gt;</div>
+      <p class="docs-p">This page lives at <code>src/cxn/page.cxn</code> and has no <code>@route</code>, so it&rsquo;s served at <code>/cxn</code>.</p>
+    </div>
+
+    <!-- ═════════════════════════════════════════════════════════════ -->
+    <div class="docs-section" id="fn">
+      <h2 class="docs-h2">@fn &mdash; reusable partials</h2>
+      <p class="docs-p">Use <code>@fn name</code> to emit a public helper instead of a page &mdash; useful for partials shared across pages.</p>
+      <div class="code-block">&lt;!-- src/partials/card.cxn --&gt;
+&#64;fn render_card
+
+&lt;div class="card"&gt;&#123;&#123;title&#125;&#125;&lt;/div&gt;</div>
+      <p class="docs-p">Compiles to <code>void render_card(PageCtx *ctx)</code> &mdash; no route, no constructor. Call from any page with <code>&lt;% render_card(ctx); %&gt;</code>.</p>
+      <p class="docs-note">You&rsquo;ll need to pass extra data via thread-local state or globals, since <code>@fn</code> functions only receive <code>ctx</code>.</p>
+    </div>
+
+    <!-- ═════════════════════════════════════════════════════════════ -->
+    <div class="docs-section" id="layout">
+      <h2 class="docs-h2">layout.cxn &amp; &#123;&#123;children&#125;&#125;</h2>
+      <p class="docs-p"><code>src/layout.cxn</code> is special &mdash; it wraps every page at the <code>&#123;&#123;children&#125;&#125;</code> marker. Compiles to <code>app_layout(req, ctx, child_fn)</code>.</p>
+      <div class="code-block">&lt;!-- src/layout.cxn --&gt;
+&lt;!DOCTYPE html&gt;
+&lt;html&gt;
+  &lt;head&gt;&lt;title&gt;cnext&lt;/title&gt;&lt;/head&gt;
+  &lt;body&gt;
+    &lt;nav&gt;...&lt;/nav&gt;
+    &lt;main&gt;&#123;&#123;children&#125;&#125;&lt;/main&gt;
+  &lt;/body&gt;
+&lt;/html&gt;</div>
+      <p class="docs-p">If you omit <code>layout.cxn</code>, pages render standalone via a weak default.</p>
+    </div>
+
+    <!-- ═════════════════════════════════════════════════════════════ -->
+    <div class="docs-section" id="db">
+      <h2 class="docs-h2">Pattern &mdash; iterate with db_scan</h2>
+      <p class="docs-p">Define the callback at file scope, then call <code>db_scan</code> inline. <code>ctx</code> is the page&rsquo;s <code>PageCtx *</code>.</p>
+      <div class="code-block">&lt;%inc db/db.h %&gt;
+
+&lt;%!
+static void render_user(const char *key, const char *val, void *arg) {
+    PageCtx *ctx = arg;
+    page_writef(ctx, "&lt;li&gt;&lt;b&gt;%s&lt;/b&gt;: %s&lt;/li&gt;", key, val);
+}
+%&gt;
+
+&lt;ul&gt;
+  &lt;% db_scan("users", render_user, ctx); %&gt;
+&lt;/ul&gt;</div>
+    </div>
+
+    <!-- ═════════════════════════════════════════════════════════════ -->
+    <div class="docs-section" id="cond">
+      <h2 class="docs-h2">Pattern &mdash; conditionals</h2>
+      <p class="docs-p">Since <code>&lt;% %&gt;</code> is raw C, just open a brace and close it in another block:</p>
+      <div class="code-block">&lt;% if (req-&gt;method[0] == 'P') { %&gt;
+  &lt;p&gt;You sent a POST&lt;/p&gt;
+&lt;% } else { %&gt;
+  &lt;p&gt;You sent a &#123;&#123;req-&gt;method&#125;&#125;&lt;/p&gt;
+&lt;% } %&gt;</div>
+      <p class="docs-sublabel">Live (this page is served via GET):</p>
+      <div class="demo-box">
+        <% if (req->method[0] == 'P') { %>
+          <p style="margin:0">You sent a POST</p>
+        <% } else { %>
+          <p style="margin:0">You sent a <strong>{{req->method}}</strong></p>
+        <% } %>
+      </div>
+    </div>
+
+    <!-- ═════════════════════════════════════════════════════════════ -->
+    <div class="docs-section" id="escape">
+      <h2 class="docs-h2">Pattern &mdash; escaping user input</h2>
+      <p class="docs-p"><code>&#123;&#123;expr&#125;&#125;</code> writes <code>expr</code> verbatim &mdash; no HTML escaping. If the value can contain <code>&lt;</code> or <code>&amp;</code>, pass it through an escaper first:</p>
+      <div class="code-block">&lt;%!
+static const char *html_escape(const char *s, char *buf, size_t cap) {
+    size_t j = 0;
+    for (size_t i = 0; s[i] &amp;&amp; j &lt; cap - 7; i++) {
+        switch (s[i]) {
+            case '&lt;': memcpy(buf+j, "&amp;lt;",  4); j += 4; break;
+            case '&gt;': memcpy(buf+j, "&amp;gt;",  4); j += 4; break;
+            case '&amp;': memcpy(buf+j, "&amp;amp;", 5); j += 5; break;
+            default:  buf[j++] = s[i];
+        }
+    }
+    buf[j] = 0;
+    return buf;
+}
+%&gt;
+
+&lt;% char tmp[1024]; %&gt;
+&lt;p&gt;&#123;&#123;html_escape(user_input, tmp, sizeof tmp)&#125;&#125;&lt;/p&gt;</div>
+    </div>
+
+    <!-- ═════════════════════════════════════════════════════════════ -->
+    <div class="docs-section" id="gotchas">
+      <h2 class="docs-h2">Gotchas</h2>
+      <ul class="docs-p" style="padding-left:20px">
+        <li><code>&lt;% ... %&gt;</code> must be on one line. Use <code>&lt;%! ... %&gt;</code> for multi-line C.</li>
+        <li>Close <code>&lt;%! %&gt;</code> blocks with <code>%&gt;</code> alone on its own line &mdash; not after code.</li>
+        <li>Every <code>&#123;&#123;expr&#125;&#125;</code> must be a valid C expression of type <code>const char *</code>.</li>
+        <li><code>&#123;&#123;children&#125;&#125;</code> is only recognised inside <code>layout.cxn</code>; elsewhere it becomes a literal <code>page_writef</code> of the word "children".</li>
+        <li>Generated files live under <code>.cnext/</code>. Never edit those &mdash; they&rsquo;re regenerated on every build.</li>
+        <li><code>@route</code> / <code>@fn</code> must appear at the start of a line (leading whitespace OK).</li>
+      </ul>
+    </div>
+
+  </div>
+</div>
+
+<%!
+/* build-timestamp helper used in #pipeline */
+static const char *__cxn_build_ts(void) {
+    return __DATE__ " " __TIME__;
+}
+%>

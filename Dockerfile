@@ -1,5 +1,7 @@
-# ── Build Stage ──────────────────────────────────────────────────────
-FROM ubuntu:24.04 AS builder
+# ── Deps Stage — toolchain + libraries only (cached layer) ───────────
+# Kept separate so lightweight targets (e.g. library-only builds) can
+# start from here without triggering a full application compile.
+FROM ubuntu:24.04 AS deps
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential git ca-certificates python3 \
@@ -13,6 +15,9 @@ RUN git clone --depth 1 --branch liburing-2.6 \
  && ./configure --prefix=/usr/local \
  && make -j$(nproc) install \
  && ldconfig
+
+# ── Build Stage ──────────────────────────────────────────────────────
+FROM deps AS builder
 
 WORKDIR /app
 COPY . .
