@@ -7,7 +7,7 @@ services:
       - "8080:8080"
     volumes:
       - ./src:/app/src
-      - ./lib_dev:/app/lib_dev
+      - ./lib:/app/lib
       - ./main.c:/app/main.c
       - ./Makefile:/app/Makefile
       - ./tools:/app/tools

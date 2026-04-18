@@ -1,6 +1,7 @@
 #ifndef PAGES_H
 #define PAGES_H
 
+#include <string.h>
 #include "server.h"
 
 // =====================================================================
@@ -14,6 +15,17 @@ typedef struct {
 
 void page_write (PageCtx *ctx, const char *html);
 void page_writef(PageCtx *ctx, const char *fmt, ...);
+
+// Fast path for compile-time-known lengths (string literals).
+// cxnc emits page_write_n(ctx, "…", sizeof("…")-1) so the length
+// is a constant — no strlen at runtime, and small memcpy can be
+// inlined into direct stores by the compiler.
+static inline void page_write_n(PageCtx *ctx, const char *s, size_t n) {
+    if (ctx->len + n >= ctx->cap) return;
+    memcpy(ctx->buf + ctx->len, s, n);
+    ctx->len += n;
+    ctx->buf[ctx->len] = '\0';
+}
 
 // =====================================================================
 // PageFn — signature ของ page function

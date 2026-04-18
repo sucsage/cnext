@@ -1,27 +1,29 @@
-# Compiled binary
+# ── Build artifacts ──────────────────────────────────────────────────
+# compiled binary
 server
-
-# Private library source — lib/libcnext.a is the published artifact
-lib_dev/
-
-# Artifacts built during source-mode builds (lib/libcnext.a is committed)
-libcnext.a
-lib_dev/*.o
-
-# cxnc build output (like .next/ in Next.js)
+# object files
+*.o
+# root-level lib archive (source-mode build) — lib/libcnext.a IS committed
+/libcnext.a
+# cxnc output (like .next/ in Next.js)
 .cnext/
 
-# LMDB runtime data (สร้างใหม่อัตโนมัติบน EC2)
-data/
-.devcontainer/
+# ── Maintainer-only — not shipped to app developers ──────────────────
+lib_dev/
+Makefile.maintainer
 
-# SSH Keys — ห้ามขึ้น Git เด็ดขาด
+# ── Runtime data — regenerated on each deploy ────────────────────────
+data/
+
+# ── Secrets — never commit ───────────────────────────────────────────
 *.pem
 *.key
 *.p12
 
-# Claude Code local settings
-.claude/
-
-# macOS
+# ── Editor / OS / tooling ────────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
 .DS_Store
+.devcontainer/
+.claude/

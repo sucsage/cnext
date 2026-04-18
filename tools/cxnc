@@ -163,31 +163,37 @@ def process(src_path, dst_path):
         out.append('    (void)req;')
 
     # รวม html segments ติดกันเป็น call เดียว เพื่อลด function calls
+    # Coalesce consecutive static output (html + html_nl) into one
+    # page_write_n call with a concatenated string literal. The length
+    # becomes a compile-time sizeof — no runtime strlen, and the small
+    # memcpy can be inlined to direct stores by the compiler.
     i = 0
     while i < len(body_lines):
         kind, val = body_lines[i]
         if kind == 'raw':
             out.append(f'    {val}')
+            i += 1
         elif kind == 'expr':
             out.append(f'    page_writef(ctx, "%s", {val});')
+            i += 1
         elif kind == 'children':
             out.append('    if (child) child(req, ctx);')
-        elif kind == 'html_nl':
-            out.append('    page_write(ctx, "\\n");')
-        elif kind == 'html':
-            segments = [val]
-            j = i + 1
-            while j < len(body_lines) and body_lines[j][0] == 'html':
-                segments.append(body_lines[j][1])
+            i += 1
+        elif kind in ('html', 'html_nl'):
+            segments = []
+            j = i
+            while j < len(body_lines) and body_lines[j][0] in ('html', 'html_nl'):
+                if body_lines[j][0] == 'html':
+                    segments.append(body_lines[j][1])
+                else:  # html_nl
+                    segments.append('\\n')
                 j += 1
-            if len(segments) == 1:
-                out.append(f'    page_write(ctx, "{segments[0]}");')
-            else:
-                for seg in segments:
-                    out.append(f'    page_write(ctx, "{seg}");')
+            # emit as C adjacent-string-literal concatenation — compiler joins at compile time
+            literal = '" "'.join(segments)
+            out.append(f'    page_write_n(ctx, "{literal}", sizeof("{literal}") - 1);')
             i = j
-            continue
-        i += 1
+        else:
+            i += 1
 
     out.append('}')
     out.append('')

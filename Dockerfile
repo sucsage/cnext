@@ -11,39 +11,27 @@ RUN git clone --depth 1 --branch liburing-2.6 \
       https://github.com/axboe/liburing.git /tmp/liburing \
  && cd /tmp/liburing \
  && ./configure --prefix=/usr/local \
- && make -j$(nproc) install
+ && make -j$(nproc) install \
+ && ldconfig
 
 WORKDIR /app
 COPY . .
-# Build binary; in source mode also refresh lib/ so libonly stage stays fresh
-RUN mkdir -p data && make clean && make \
- && if [ -f lib_dev/server.c ]; then make lib-pack; fi
-
-# ── Lib Stage — export libcnext.a + headers from lib/ ─────────────────
-# Via Makefile (recommended):
-#   make pack-docker
-# Or manually:
-#   docker build --target=libonly -t cnext-lib .
-#   docker create --name cnext-lib-tmp cnext-lib
-#   docker cp cnext-lib-tmp:/libcnext.a lib/libcnext.a
-#   docker cp cnext-lib-tmp:/include    lib/include
-#   docker rm cnext-lib-tmp
-FROM scratch AS libonly
-COPY --from=builder /app/lib/libcnext.a /libcnext.a
-COPY --from=builder /app/lib/include    /include
+# If lib_dev/ is present (maintainer build), rebake lib/libcnext.a from source first;
+# then the main Makefile (consumer) links the app against lib/libcnext.a.
+RUN mkdir -p data \
+ && if [ -f lib_dev/server.c ]; then \
+      make -f Makefile.maintainer pack-native; \
+    fi \
+ && make clean && make
 
 # ── Dev Stage — watch files, rebuild + restart on change ──────────────
 # Used by `make dev` via compose.dev.yaml (bind-mounts src/, lib_dev/, etc.)
+# Uses polling (not inotify) because Docker Desktop on macOS uses virtio-fs
+# which doesn't forward inotify events from host file edits.
 FROM builder AS dev
-RUN apt-get update && apt-get install -y --no-install-recommends entr \
-    && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 EXPOSE 8080
-# Outer loop re-runs `find` when new files appear (entr -d exits on new file)
-CMD while true; do \
-      find src lib_dev main.c Makefile tools -type f 2>/dev/null \
-        | entr -dr sh -c 'make && ./server'; \
-    done
+CMD ["sh", "tools/dev-watch.sh"]
 
 # ── Runtime Stage ─────────────────────────────────────────────────────
 FROM ubuntu:24.04

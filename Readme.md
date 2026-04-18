@@ -3,8 +3,10 @@
 Next.js-style SSR framework written in C — file-based routing, `.cxn` templates, server actions, compiled to a single binary.
 
 ```bash
-docker build -t cnext .
-docker run --rm -p 8080:8080 --security-opt seccomp=unconfined cnext
+make dev        # live-reload dev server (Docker)
+make start      # production build + run  (Docker)
+make native     # Linux only — native build, no Docker
+make help       # list all targets
 ```
 
 ---
@@ -18,6 +20,41 @@ docker run --rm -p 8080:8080 --security-opt seccomp=unconfined cnext
 | Persistence | LMDB — async write queue, batch commit, `MDB_MAPASYNC` |
 | Cache | RAM hash table — FNV-1a, LRU eviction, background eviction thread |
 | Fetch | libcurl wrapper — non-blocking via background thread + cache |
+
+---
+
+## Install
+
+`cnext` runs on **Linux** because it's built on `io_uring` (a Linux kernel API). On macOS and Windows you run it inside Docker.
+
+### Docker (recommended — works on macOS / Windows / Linux)
+
+Once Docker is installed, `make dev` is the only command you need.
+
+- **macOS** — install [Docker Desktop for Mac](https://docs.docker.com/desktop/install/mac-install/) (Apple Silicon or Intel). Open Docker Desktop once after install so the daemon starts.
+- **Windows** — install [Docker Desktop for Windows](https://docs.docker.com/desktop/install/windows-install/). It uses WSL 2 under the hood; the installer sets that up for you.
+- **Linux** — install [Docker Engine](https://docs.docker.com/engine/install/), then add your user to the `docker` group so you don't need `sudo`:
+
+  ```bash
+  sudo usermod -aG docker $USER && newgrp docker
+  ```
+
+Verify: `docker run --rm hello-world`
+
+### Native (Linux only, no Docker)
+
+```bash
+sudo apt install build-essential python3 \
+                 liblmdb-dev libnghttp2-dev libcurl4-openssl-dev
+
+# liburing 2.6+ — build from source if your distro's package is older
+git clone --depth 1 --branch liburing-2.6 https://github.com/axboe/liburing.git
+cd liburing && ./configure --prefix=/usr/local && make && sudo make install && sudo ldconfig
+
+cd /path/to/cnext && make native && ./server
+```
+
+`make native` checks deps before building and prints exactly what's missing. On macOS / Windows it refuses to run and points you at `make dev`.
 
 ---
 
@@ -165,7 +202,22 @@ if (fr) {
 
 ---
 
-## Docker Run
+## Dev Mode
+
+Save any source file and the server rebuilds, restarts, and the browser auto-reloads.
+
+```bash
+make dev          # start dev server
+make dev-down     # stop
+```
+
+`src/`, `lib/`, `main.c`, `Makefile`, `tools/`, `public/` are bind-mounted. The watcher polls mtimes every second (Docker Desktop on macOS doesn't forward inotify events). A small JS snippet injected before `</body>` polls `/__dev/ping` and reloads the page when the server comes back up.
+
+---
+
+## Docker Run (manual)
+
+`make start` wraps this — only use it directly if you need custom flags:
 
 ```bash
 docker run --rm -p 8080:8080 \
@@ -177,20 +229,6 @@ docker run --rm -p 8080:8080 \
   cnext
 ```
 
-> **macOS, Windows:** io_uring is Linux-only. Always build and run via Docker.
-
----
-
-## Dev Mode
-
-Live-reload via Docker + `entr` — save any source file and the server rebuilds and restarts.
-
-```bash
-make dev          # docker compose up (watch + rebuild + restart)
-make dev-down     # stop the dev container
-```
-
-`src/`, `lib/`, `main.c`, `Makefile`, `tools/` are bind-mounted — edits on the host trigger a rebuild inside the container.
 ---
 
 ## Project Structure
@@ -204,12 +242,12 @@ src/
     route.c             → GET + POST /path   (API)
     action.c            → POST /action/path/create
     action_delete.c     → POST /action/path/delete
-    
-lib/                    (public artifact — committed)
-  libcnext.a            prebuilt static library
+
+lib/                    prebuilt framework (committed)
+  libcnext.a            static library
   include/              public headers
 
-.cnext/                 (gitignored — cxnc build output, like .next in Next.js)
+.cnext/                 (gitignored — cxnc build output, like .next/ in Next.js)
   src/**/*_cxn.c        generated from src/**/*.cxn
 
 tools/
