@@ -34,15 +34,19 @@ PAGE_SRC   = $(shell find src -name 'page.c'    2>/dev/null)
 ROUTE_SRC  = $(shell find src -name 'route.c'   2>/dev/null)
 ACTION_SRC = $(shell find src -name 'action*.c' 2>/dev/null)
 CXN_SRC    = $(shell find src -name '*.cxn'     2>/dev/null)
-CXN_GEN    = $(CXN_SRC:.cxn=_cxn.c)
+
+# Build output — all cxnc-generated .c files live under .cnext/ (like .next in Next.js)
+BUILD_DIR = .cnext
+CXN_GEN   = $(patsubst %.cxn,$(BUILD_DIR)/%_cxn.c,$(CXN_SRC))
 
 APP_SRC = main.c $(PAGE_SRC) $(ROUTE_SRC) $(ACTION_SRC) $(CXN_GEN)
 
 all: $(CXN_GEN) $(LIB_A) $(TARGET)
 	@echo "[build] mode=$(MODE) → $(TARGET)"
 
-# .cxn → _cxn.c
-%_cxn.c: %.cxn tools/cxnc
+# src/foo/page.cxn → .cnext/src/foo/page_cxn.c
+$(BUILD_DIR)/%_cxn.c: %.cxn tools/cxnc
+	@mkdir -p $(dir $@)
 	python3 tools/cxnc $< $@
 
 ifeq ($(MODE),source)
@@ -82,10 +86,18 @@ $(TARGET): $(APP_SRC) $(LIB_A) $(DEPS)
 	$(CC) $(CFLAGS) $(APP_SRC) $(LIB_A) -o $(TARGET) $(LDFLAGS)
 
 clean:
-	rm -f $(TARGET) $(CXN_GEN)
+	rm -f $(TARGET)
+	rm -rf $(BUILD_DIR)
 ifeq ($(MODE),source)
 	rm -f $(LIB_OBJ) $(LIB_A)
 endif
+
+# Dev mode — docker compose + entr: rebuild + restart on file change
+dev:
+	docker compose -f compose.dev.yaml up --build
+
+dev-down:
+	docker compose -f compose.dev.yaml down
 
 db-dir:
 	mkdir -p ./data
@@ -94,4 +106,4 @@ list-pages:
 	@echo "Pages (page.c):"; find src -name 'page.c'  | sed 's|src||;s|/page.c||;s|^$$|/|'  | sort
 	@echo "Pages (.cxn):";   find src -name '*.cxn'   | sed 's|src||;s|\.cxn$$||' | sort
 
-.PHONY: all clean db-dir list-pages lib-pack pack-docker
+.PHONY: all clean db-dir list-pages lib-pack pack-docker dev dev-down

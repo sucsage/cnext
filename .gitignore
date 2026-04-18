@@ -8,8 +8,8 @@ lib_dev/
 libcnext.a
 lib_dev/*.o
 
-# Generated from .cxn at build time
-src/**/*_cxn.c
+# cxnc build output (like .next/ in Next.js)
+.cnext/
 
 # LMDB runtime data (สร้างใหม่อัตโนมัติบน EC2)
 data/

@@ -32,6 +32,19 @@ FROM scratch AS libonly
 COPY --from=builder /app/lib/libcnext.a /libcnext.a
 COPY --from=builder /app/lib/include    /include
 
+# ── Dev Stage — watch files, rebuild + restart on change ──────────────
+# Used by `make dev` via compose.dev.yaml (bind-mounts src/, lib_dev/, etc.)
+FROM builder AS dev
+RUN apt-get update && apt-get install -y --no-install-recommends entr \
+    && rm -rf /var/lib/apt/lists/*
+WORKDIR /app
+EXPOSE 8080
+# Outer loop re-runs `find` when new files appear (entr -d exits on new file)
+CMD while true; do \
+      find src lib_dev main.c Makefile tools -type f 2>/dev/null \
+        | entr -dr sh -c 'make && ./server'; \
+    done
+
 # ── Runtime Stage ─────────────────────────────────────────────────────
 FROM ubuntu:24.04
 

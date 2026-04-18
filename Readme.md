@@ -181,6 +181,19 @@ docker run --rm -p 8080:8080 \
 
 ---
 
+## Dev Mode
+
+Live-reload via Docker + `entr` — save any source file and the server rebuilds and restarts.
+
+```bash
+make dev          # docker compose up (watch + rebuild + restart)
+make dev-down     # stop the dev container
+```
+
+`src/`, `lib_dev/`, `main.c`, `Makefile`, `tools/` are bind-mounted — edits on the host trigger a rebuild inside the container.
+
+---
+
 ## Build Modes
 
 The framework ships the library as a prebuilt static archive so `lib_dev/*.c` stays private.
@@ -219,21 +232,13 @@ src/
     route.c             → GET + POST /path   (API)
     action.c            → POST /action/path/create
     action_delete.c     → POST /action/path/delete
-
-lib_dev/                (gitignored — private source)
-  server.h / server.c   io_uring HTTP server + HTTP/1.1
-  pages.h / pages.c     page engine
-  h2.c                  HTTP/2 via nghttp2
-  static.h / static.c   static file cache (RAM)
-  fetch.h / fetch.c     libcurl wrapper
-  db/
-    db.h / db.c         two-tier API
-    hot.h / hot.c       RAM cache (hash table)
-    cold.h / cold.c     LMDB async writer
-
+    
 lib/                    (public artifact — committed)
   libcnext.a            prebuilt static library
   include/              public headers (mirror of lib_dev/*.h)
+
+.cnext/                 (gitignored — cxnc build output, like .next in Next.js)
+  src/**/*_cxn.c        generated from src/**/*.cxn
 
 tools/
   cxnc                  .cxn → .c compiler (Python)

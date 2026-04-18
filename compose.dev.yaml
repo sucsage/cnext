@@ -1,0 +1,22 @@
+services:
+  dev:
+    build:
+      context: .
+      target: dev
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./src:/app/src
+      - ./lib_dev:/app/lib_dev
+      - ./main.c:/app/main.c
+      - ./Makefile:/app/Makefile
+      - ./tools:/app/tools
+      - ./public:/app/public
+      - ./data:/app/data
+    security_opt:
+      - seccomp:unconfined   # io_uring syscalls
+    cap_add:
+      - SYS_NICE             # IORING_SETUP_SQPOLL
+    ulimits:
+      nofile: 65536
+      memlock: -1
