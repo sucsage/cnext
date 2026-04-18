@@ -15,20 +15,22 @@ RUN git clone --depth 1 --branch liburing-2.6 \
 
 WORKDIR /app
 COPY . .
-# Build binary; in source mode also refresh plib/ so libonly stage stays fresh
+# Build binary; in source mode also refresh lib/ so libonly stage stays fresh
 RUN mkdir -p data && make clean && make \
- && if [ -f lib/server.c ]; then make plib-pack; fi
+ && if [ -f lib_dev/server.c ]; then make lib-pack; fi
 
-# ── Lib Stage — export libcnext.a + headers from plib/ ────────────────
-# Recommended (buildx):
-#   docker buildx build --target=libonly -o type=local,dest=plib .
-# Or via classic build:
+# ── Lib Stage — export libcnext.a + headers from lib/ ─────────────────
+# Via Makefile (recommended):
+#   make pack-docker
+# Or manually:
 #   docker build --target=libonly -t cnext-lib .
-#   docker create --name _lib cnext-lib
-#   docker cp _lib:/dist/. ./plib && docker rm _lib
+#   docker create --name cnext-lib-tmp cnext-lib
+#   docker cp cnext-lib-tmp:/libcnext.a lib/libcnext.a
+#   docker cp cnext-lib-tmp:/include    lib/include
+#   docker rm cnext-lib-tmp
 FROM scratch AS libonly
-COPY --from=builder /app/plib/libcnext.a /libcnext.a
-COPY --from=builder /app/plib/include    /include
+COPY --from=builder /app/lib/libcnext.a /libcnext.a
+COPY --from=builder /app/lib/include    /include
 
 # ── Runtime Stage ─────────────────────────────────────────────────────
 FROM ubuntu:24.04

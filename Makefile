@@ -4,24 +4,24 @@ LDFLAGS     = -L/usr/local/lib -luring -llmdb -lnghttp2 -lcurl
 TARGET      = server
 
 # ── Mode detection ───────────────────────────────────────────────────
-# source mode   : lib/ exists (dev machine) → compile lib from .c
-# consumer mode : lib/ absent (EC2, CI, public clone) → link plib/libcnext.a
-HAS_LIB_SRC := $(wildcard lib/server.c)
+# source mode   : lib_dev/ exists (dev machine) → compile lib from .c
+# consumer mode : lib_dev/ absent (EC2, CI, public clone) → link lib/libcnext.a
+HAS_LIB_SRC := $(wildcard lib_dev/server.c)
 
 ifneq ($(HAS_LIB_SRC),)
   MODE    = source
-  CFLAGS  = $(CFLAGS_BASE) -Ilib
-  LIB_SRC = lib/server.c lib/h2.c lib/pages.c lib/static.c \
-            lib/fetch.c \
-            lib/db/hot.c lib/db/cold.c lib/db/db.c
+  CFLAGS  = $(CFLAGS_BASE) -Ilib_dev
+  LIB_SRC = lib_dev/server.c lib_dev/h2.c lib_dev/pages.c lib_dev/static.c \
+            lib_dev/fetch.c \
+            lib_dev/db/hot.c lib_dev/db/cold.c lib_dev/db/db.c
   LIB_OBJ = $(LIB_SRC:.c=.o)
   LIB_A   = libcnext.a
-  DEPS    = lib/server.h lib/pages.h lib/static.h lib/fetch.h lib/route.h \
-            lib/db/hot.h lib/db/cold.h lib/db/db.h
+  DEPS    = lib_dev/server.h lib_dev/pages.h lib_dev/static.h lib_dev/fetch.h lib_dev/route.h \
+            lib_dev/db/hot.h lib_dev/db/cold.h lib_dev/db/db.h
 else
   MODE   = consumer
-  CFLAGS = $(CFLAGS_BASE) -Iplib/include
-  LIB_A  = plib/libcnext.a
+  CFLAGS = $(CFLAGS_BASE) -Ilib/include
+  LIB_A  = lib/libcnext.a
   DEPS   =
 endif
 
@@ -46,36 +46,36 @@ all: $(CXN_GEN) $(LIB_A) $(TARGET)
 	python3 tools/cxnc $< $@
 
 ifeq ($(MODE),source)
-# lib/*.c → lib/*.o
+# lib_dev/*.c → lib_dev/*.o
 %.o: %.c $(DEPS)
 	$(CC) $(CFLAGS) -c $< -o $@
 
-# lib/*.o → libcnext.a
+# lib_dev/*.o → libcnext.a
 $(LIB_A): $(LIB_OBJ)
 	ar rcs $@ $^
 	@echo "[lib] $(LIB_A) ready ($(words $(LIB_OBJ)) objects)"
 
-# Pack plib/ for distribution (copy built libcnext.a + public headers)
-plib-pack: $(LIB_A)
-	rm -rf plib/include
-	mkdir -p plib/include/db
-	cp $(LIB_A) plib/libcnext.a
-	cp lib/*.h plib/include/
-	cp lib/db/*.h plib/include/db/
-	@echo "[plib] packed → plib/libcnext.a + include/"
+# Pack lib/ for distribution (copy built libcnext.a + public headers)
+lib-pack: $(LIB_A)
+	rm -rf lib/include
+	mkdir -p lib/include/db
+	cp $(LIB_A) lib/libcnext.a
+	cp lib_dev/*.h lib/include/
+	cp lib_dev/db/*.h lib/include/db/
+	@echo "[lib] packed → lib/libcnext.a + include/"
 endif
 
-# Refresh plib/ via Docker — use on macOS where liburing can't compile natively
+# Refresh lib/ via Docker — use on macOS where liburing can't compile natively
 pack-docker:
 	docker build --target=builder -t cnext-pack-builder .
 	docker rm -f cnext-pack 2>/dev/null || true
 	docker create --name cnext-pack cnext-pack-builder
-	mkdir -p plib
-	docker cp cnext-pack:/app/plib/libcnext.a plib/libcnext.a
-	rm -rf plib/include
-	docker cp cnext-pack:/app/plib/include plib/include
+	mkdir -p lib
+	docker cp cnext-pack:/app/lib/libcnext.a lib/libcnext.a
+	rm -rf lib/include
+	docker cp cnext-pack:/app/lib/include lib/include
 	docker rm cnext-pack
-	@echo "[pack] plib/ refreshed via docker — commit and push"
+	@echo "[pack] lib/ refreshed via docker — commit and push"
 
 # link final binary
 $(TARGET): $(APP_SRC) $(LIB_A) $(DEPS)
@@ -94,4 +94,4 @@ list-pages:
 	@echo "Pages (page.c):"; find src -name 'page.c'  | sed 's|src||;s|/page.c||;s|^$$|/|'  | sort
 	@echo "Pages (.cxn):";   find src -name '*.cxn'   | sed 's|src||;s|\.cxn$$||' | sort
 
-.PHONY: all clean db-dir list-pages plib-pack pack-docker
+.PHONY: all clean db-dir list-pages lib-pack pack-docker

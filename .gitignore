@@ -1,12 +1,12 @@
 # Compiled binary
 server
 
-# Private library source — plib/libcnext.a is the published artifact
-lib/
+# Private library source — lib/libcnext.a is the published artifact
+lib_dev/
 
-# Artifacts built during source-mode builds (plib/libcnext.a is committed)
+# Artifacts built during source-mode builds (lib/libcnext.a is committed)
 libcnext.a
-lib/*.o
+lib_dev/*.o
 
 # Generated from .cxn at build time
 src/**/*_cxn.c

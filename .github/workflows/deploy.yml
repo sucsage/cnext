@@ -12,20 +12,20 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      # lib/*.c is private (gitignored). EC2 links against plib/libcnext.a.
-      # Fail fast if the dev forgot to run `make plib-pack` before pushing.
+      # lib_dev/*.c is private (gitignored). EC2 links against lib/libcnext.a.
+      # Fail fast if the dev forgot to run `make lib-pack` before pushing.
       - name: Verify prebuilt library
         run: |
-          for f in plib/libcnext.a \
-                   plib/include/server.h \
-                   plib/include/pages.h \
-                   plib/include/db/db.h; do
+          for f in lib/libcnext.a \
+                   lib/include/server.h \
+                   lib/include/pages.h \
+                   lib/include/db/db.h; do
             if [ ! -f "$f" ]; then
-              echo "::error::missing $f — run 'make plib-pack' (or 'make pack-docker' on macOS) before pushing"
+              echo "::error::missing $f — run 'make lib-pack' (or 'make pack-docker' on macOS) before pushing"
               exit 1
             fi
           done
-          echo "plib/ OK — $(du -h plib/libcnext.a | cut -f1) libcnext.a"
+          echo "lib/ OK — $(du -h lib/libcnext.a | cut -f1) libcnext.a"
 
       - name: Deploy via SSH
         uses: appleboy/ssh-action@v1
@@ -46,7 +46,7 @@ jobs:
             dpkg -s libcurl4-openssl-dev >/dev/null 2>&1 || \
               sudo apt-get install -y --no-install-recommends libcurl4-openssl-dev
 
-            echo "=== Build (consumer mode — uses plib/libcnext.a) ==="
+            echo "=== Build (consumer mode — uses lib/libcnext.a) ==="
             make clean && make
 
             echo "=== Restart service ==="
