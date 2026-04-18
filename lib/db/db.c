@@ -118,6 +118,7 @@ int db_scan(const char *ns,
             void (*cb)(const char *key, const char *val, void *ctx),
             void *ctx)
 {
+    cold_flush();   // รอ async writes commit ก่อน scan (ไม่มี pending → return ทันที)
     return cold_scan(ns, cb, ctx);
 }
 
@@ -156,7 +157,8 @@ char *db_list(const char *ns)
     if (cached)
         return cached;
 
-    // miss → scan cold
+    // miss → wait for any pending async writes, then scan cold
+    cold_flush();
     ListBuf b;
     b.buf[0] = '[';
     b.len = 1;

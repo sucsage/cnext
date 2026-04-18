@@ -91,7 +91,7 @@ static __thread int   use_fixed_buf   = 0;
 static __thread int   use_fixed_files = 0;
 static __thread int  *fd_table;
 // [6] Provided Buffers — kernel เลือก recv buffer เอง, ไม่ต้องผูกกับ connection
-#define BUF_RING_COUNT 256   // power of 2, shared pool per worker
+#define BUF_RING_COUNT 4096  // power of 2, match CONN_POOL_SIZE → ทุก connection ได้ fast path
 #define BUF_GID        1
 static __thread struct io_uring_buf_ring *buf_ring          = NULL;
 static __thread char                     *buf_pool          = NULL;
@@ -291,6 +291,53 @@ void set_raw_response(const char *buf, size_t len) {
     size_t n = len < RESP_BUF_SIZE ? len : RESP_BUF_SIZE;
     memcpy(tls_resp, buf, n);
     tls_wlen = n;
+}
+
+void send_redirect(int socket_fd, const char *location) {
+    (void)socket_fd;
+    if (tls_h2_active) {
+        // H2: ส่ง meta-refresh เพราะยังไม่มี custom Location header API
+        char body[512];
+        int n = snprintf(body, sizeof(body),
+            "<html><head><meta http-equiv='refresh' content='0;url=%s'></head></html>",
+            location);
+        h2_respond((H2State *)tls_h2_state, tls_h2_stream,
+                   302, "text/html", body, n > 0 ? (size_t)n : 0);
+        return;
+    }
+    int n = snprintf(tls_resp, RESP_BUF_SIZE,
+        "HTTP/1.1 302 Found\r\nLocation: %s\r\n"
+        "Content-Length: 0\r\nConnection: %s\r\n\r\n",
+        location, tls_keep_alive ? "keep-alive" : "close");
+    tls_wlen = n > 0 ? (size_t)n : 0;
+}
+
+void parse_form(const char *body, const char *key, char *out, size_t out_len) {
+    out[0] = '\0';
+    if (!body || !key || out_len == 0) return;
+    size_t klen = strlen(key);
+    const char *p = body;
+    while (*p) {
+        if (strncmp(p, key, klen) == 0 && p[klen] == '=') {
+            p += klen + 1;
+            size_t i = 0;
+            while (*p && *p != '&' && i < out_len - 1) {
+                if (*p == '+') {
+                    out[i++] = ' '; p++;
+                } else if (*p == '%' && p[1] && p[2]) {
+                    char hex[3] = { p[1], p[2], '\0' };
+                    out[i++] = (char)strtol(hex, NULL, 16);
+                    p += 3;
+                } else {
+                    out[i++] = *p++;
+                }
+            }
+            out[i] = '\0';
+            return;
+        }
+        while (*p && *p != '&') p++;
+        if (*p == '&') p++;
+    }
 }
 
 static void dispatch(HttpRequest *req, int fd) {

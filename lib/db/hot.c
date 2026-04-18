@@ -4,6 +4,7 @@
 #include <string.h>
 #include <stdint.h>
 #include <time.h>
+#include <unistd.h>
 #include <pthread.h>
 #include "hot.h"
 
@@ -35,7 +36,8 @@ typedef struct {
 static Slot              table[HOT_CAP];
 static size_t            used;
 static uint64_t          tick;
-static pthread_rwlock_t  rwlock = PTHREAD_RWLOCK_INITIALIZER;
+static pthread_rwlock_t  rwlock    = PTHREAD_RWLOCK_INITIALIZER;
+static pthread_once_t    evict_once = PTHREAD_ONCE_INIT;
 
 // =====================================================================
 // FNV-1a hash
@@ -47,7 +49,12 @@ static uint32_t fnv1a(const char *s) {
 }
 
 static void make_key(char *out, const char *ns, const char *key) {
-    snprintf(out, KEY_MAX, "%s\x01%s", ns, key);
+    size_t nlen = strlen(ns);
+    size_t klen = strlen(key);
+    if (nlen + 1 + klen >= KEY_MAX) nlen = KEY_MAX - klen - 2;
+    memcpy(out, ns, nlen);
+    out[nlen] = '\x01';
+    memcpy(out + nlen + 1, key, klen + 1);  // +1 รวม '\0'
 }
 
 // =====================================================================
@@ -89,12 +96,41 @@ static void evict(void) {
 }
 
 // =====================================================================
+// Background eviction thread — ทำงานทุก 5 วินาที
+// hot_put ไม่ต้อง evict เองภายใต้ write lock อีกต่อไป
+// (ยกเว้น emergency: table เต็ม > 95%)
+// =====================================================================
+#define EVICT_INTERVAL_SEC 5
+#define LOAD_EMERGENCY     (HOT_CAP * 95 / 100)
+
+static void *evict_worker(void *arg) {
+    (void)arg;
+    for (;;) {
+        sleep(EVICT_INTERVAL_SEC);
+        pthread_rwlock_wrlock(&rwlock);
+        evict();
+        pthread_rwlock_unlock(&rwlock);
+    }
+    return NULL;
+}
+
+static void start_evict_thread(void) {
+    pthread_t t;
+    pthread_attr_t attr;
+    pthread_attr_init(&attr);
+    pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
+    pthread_create(&t, &attr, evict_worker, NULL);
+    pthread_attr_destroy(&attr);
+}
+
+// =====================================================================
 // Init / Destroy
 // =====================================================================
 void hot_init(void) {
     memset(table, 0, sizeof(table));
     used = 0;
     tick = 0;
+    pthread_once(&evict_once, start_evict_thread);
     printf("[cnext-db] hot store ready  cap=%d slots\n", HOT_CAP);
 }
 
@@ -122,7 +158,9 @@ int hot_put(const char *ns, const char *key, const char *val, size_t vlen) {
 
     pthread_rwlock_wrlock(&rwlock);
 
-    if (used >= LOAD_HIGH) evict();
+    // background thread จัดการ evict ทุก 5s
+    // inline evict เฉพาะ emergency (>95%) เพื่อป้องกัน table เต็ม
+    if (used >= LOAD_EMERGENCY) evict();
 
     uint32_t h = fnv1a(fk);
     int first_dead = -1;

@@ -31,30 +31,34 @@ struct H2State {
     H2Stream         streams[MAX_H2_STREAMS];
     H2DispatchFn     dispatch_fn;
     // Accumulated send buffer (send_callback appends here)
+    // sndrdpos = read head → drain ไม่ต้อง memmove อีกต่อไป
     uint8_t         *sndbuf;
+    size_t           sndrdpos;
     size_t           sndlen;
     size_t           sndcap;
 };
 
 // ── Stream helpers ────────────────────────────────────────────────────
+static void stream_free(H2Stream *s);   // forward declaration
+
+// HTTP/2 client stream IDs เป็น odd integers: 1, 3, 5, ...
+// map ตรงสู่ slot array → O(1) lookup ทุก nghttp2 callback
+static inline int stream_slot(int32_t id) {
+    return (int)(((uint32_t)id >> 1) & (MAX_H2_STREAMS - 1));
+}
 
 static H2Stream *stream_find(H2State *h, int32_t id) {
-    for (int i = 0; i < MAX_H2_STREAMS; i++)
-        if (h->streams[i].used && h->streams[i].id == id)
-            return &h->streams[i];
-    return NULL;
+    H2Stream *s = &h->streams[stream_slot(id)];
+    return (s->used && s->id == id) ? s : NULL;
 }
 
 static H2Stream *stream_alloc(H2State *h, int32_t id) {
-    for (int i = 0; i < MAX_H2_STREAMS; i++) {
-        if (!h->streams[i].used) {
-            memset(&h->streams[i], 0, sizeof(H2Stream));
-            h->streams[i].id   = id;
-            h->streams[i].used = 1;
-            return &h->streams[i];
-        }
-    }
-    return NULL;
+    H2Stream *s = &h->streams[stream_slot(id)];
+    if (s->used) stream_free(s);   // evict (stream IDs wrap after 2^31)
+    memset(s, 0, sizeof(H2Stream));
+    s->id   = id;
+    s->used = 1;
+    return s;
 }
 
 static void stream_free(H2Stream *s) {
@@ -72,6 +76,13 @@ static ssize_t cb_send(nghttp2_session *session,
                         int flags, void *user_data) {
     (void)session; (void)flags;
     H2State *h = user_data;
+    size_t used = h->sndlen - h->sndrdpos;
+    if (h->sndrdpos > 0 && used + length <= h->sndcap) {
+        // compact: slide unread bytes to front, reset read head
+        memmove(h->sndbuf, h->sndbuf + h->sndrdpos, used);
+        h->sndlen   = used;
+        h->sndrdpos = 0;
+    }
     if (h->sndlen + length > h->sndcap) {
         size_t nc = h->sndcap ? h->sndcap * 2 : 4096;
         while (nc < h->sndlen + length) nc *= 2;
@@ -227,14 +238,16 @@ int h2_recv(H2State *h, const char *data, size_t len) {
     return 0;
 }
 
-int    h2_want_write(H2State *h) { return h->sndlen > 0; }
-char  *h2_sndbuf(H2State *h)    { return (char *)h->sndbuf; }
-size_t h2_sndlen(H2State *h)    { return h->sndlen; }
+int    h2_want_write(H2State *h) { return h->sndlen > h->sndrdpos; }
+char  *h2_sndbuf(H2State *h)    { return (char *)h->sndbuf + h->sndrdpos; }
+size_t h2_sndlen(H2State *h)    { return h->sndlen - h->sndrdpos; }
 
 void h2_drain(H2State *h, size_t n) {
-    if (n >= h->sndlen) { h->sndlen = 0; return; }
-    memmove(h->sndbuf, h->sndbuf + n, h->sndlen - n);
-    h->sndlen -= n;
+    h->sndrdpos += n;
+    if (h->sndrdpos >= h->sndlen) {
+        h->sndrdpos = 0;
+        h->sndlen   = 0;   // buffer ว่างทั้งหมด → reset ทั้งคู่
+    }
 }
 
 // ── Response submit ───────────────────────────────────────────────────

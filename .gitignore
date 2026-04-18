@@ -3,6 +3,8 @@ server
 
 # LMDB runtime data (สร้างใหม่อัตโนมัติบน EC2)
 data/
+lib/
+.devcontainer/
 
 # SSH Keys — ห้ามขึ้น Git เด็ดขาด
 *.pem

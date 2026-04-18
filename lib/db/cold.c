@@ -30,11 +30,13 @@ typedef struct {
 } WriteJob;
 
 static WriteJob        wq[WQ_SIZE];
-static int             wq_head = 0;   // producer เขียนที่นี่
-static int             wq_tail = 0;   // consumer อ่านที่นี่
+static int             wq_head    = 0;  // producer เขียนที่นี่
+static int             wq_tail    = 0;  // consumer อ่านที่นี่
+static int             wq_flushed = 0;  // jobs ที่ commit สำเร็จแล้ว (monotonic)
 static pthread_mutex_t wq_mu    = PTHREAD_MUTEX_INITIALIZER;
 static pthread_cond_t  wq_data  = PTHREAD_COND_INITIALIZER;  // มี data ใหม่
 static pthread_cond_t  wq_space = PTHREAD_COND_INITIALIZER;  // มี space ว่าง
+static pthread_cond_t  wq_done  = PTHREAD_COND_INITIALIZER;  // commit เสร็จ
 
 // =====================================================================
 // LMDB State
@@ -110,10 +112,17 @@ static void *writer_thread(void *arg) {
             batch++;
         }
 
+        int committed_tail = wq_tail;        // บันทึกค่าก่อน unlock
         pthread_cond_broadcast(&wq_space);   // บอก producer ว่ามี space แล้ว
         pthread_mutex_unlock(&wq_mu);
 
         mdb_txn_commit(txn);                 // commit นอก lock → ไม่บล็อก producer
+
+        // แจ้ง cold_flush() ว่า jobs ถึง committed_tail ถูก commit แล้ว
+        pthread_mutex_lock(&wq_mu);
+        wq_flushed = committed_tail;
+        pthread_cond_broadcast(&wq_done);
+        pthread_mutex_unlock(&wq_mu);
     }
 
     // Flush ที่เหลือก่อน exit
@@ -304,6 +313,18 @@ int cold_scan(const char *ns,
     mdb_cursor_close(cur);
     mdb_txn_abort(txn);
     return count;
+}
+
+// =====================================================================
+// Flush — รอให้ทุก job ที่ enqueue ไว้แล้ว commit สำเร็จก่อน return
+// ถ้าไม่มี pending jobs → return ทันที (wq_flushed == wq_head)
+// =====================================================================
+void cold_flush(void) {
+    pthread_mutex_lock(&wq_mu);
+    int target = wq_head;
+    while (wq_flushed < target)
+        pthread_cond_wait(&wq_done, &wq_mu);
+    pthread_mutex_unlock(&wq_mu);
 }
 
 // =====================================================================

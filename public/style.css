@@ -58,10 +58,11 @@ body {
 .nav-links a:hover { color: var(--text); }
 
 /* ── Main ── */
-main {
-  flex: 1;
-  max-width: 860px;
-  width: 100%;
+main { flex: 1; width: 100%; }
+
+/* Inner pages (non-docs) */
+.page {
+  max-width: 720px;
   margin: 0 auto;
   padding: 3rem 1.5rem;
 }
@@ -243,3 +244,176 @@ button:disabled { opacity: .5; cursor: not-allowed; }
 @keyframes shimmer { to { background-position: -200% 0; } }
 
 .error { color: #f87171; font-size: .9rem; padding: 1rem; }
+
+/* ============================================================
+   Docs layout
+   ============================================================ */
+.docs-layout {
+  display: grid;
+  grid-template-columns: 220px 1fr;
+  min-height: calc(100vh - 56px - 53px); /* full viewport minus nav + footer */
+}
+
+.docs-sidebar {
+  border-right: 1px solid var(--border);
+  padding: 2rem 1rem 2rem 1.5rem;
+  position: sticky;
+  top: 56px;
+  height: calc(100vh - 56px);
+  overflow-y: auto;
+}
+
+.docs-nav-group {
+  font-size: .68rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .1em;
+  color: var(--muted);
+  padding: .25rem .5rem;
+  margin: 1.5rem 0 .35rem;
+}
+.docs-nav-group:first-child { margin-top: 0; }
+
+.docs-nav-link {
+  display: block;
+  padding: .3rem .6rem;
+  font-size: .84rem;
+  color: var(--muted);
+  text-decoration: none;
+  border-radius: 6px;
+  transition: color .12s, background .12s;
+  margin-bottom: .05rem;
+}
+.docs-nav-link:hover { color: var(--text); background: rgba(255,255,255,.05); }
+
+/* Docs content */
+.docs-content {
+  padding: 3rem 3.5rem;
+  max-width: 800px;
+  min-width: 0;
+}
+
+.docs-title {
+  font-size: 2.25rem;
+  font-weight: 800;
+  letter-spacing: -.03em;
+  background: linear-gradient(135deg, #fff 30%, var(--accent2));
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  margin-bottom: .75rem;
+}
+
+.docs-lead {
+  color: var(--muted);
+  font-size: .97rem;
+  line-height: 1.7;
+  margin-bottom: 2rem;
+}
+
+.docs-section { margin-top: 3.5rem; padding-top: .5rem; }
+.docs-section:first-child { margin-top: 0; }
+
+.docs-h2 {
+  font-size: 1.25rem;
+  font-weight: 700;
+  letter-spacing: -.02em;
+  margin-bottom: 1rem;
+  padding-bottom: .6rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.docs-p {
+  font-size: .9rem;
+  color: var(--muted);
+  line-height: 1.75;
+  margin-bottom: 1rem;
+}
+
+.docs-p code, .docs-lead code {
+  font-family: 'SF Mono', 'Fira Code', monospace;
+  font-size: .82em;
+  color: var(--accent2);
+  background: rgba(124,106,255,.1);
+  padding: .1em .35em;
+  border-radius: 4px;
+}
+
+.docs-note {
+  font-size: .82rem;
+  color: var(--muted);
+  margin-top: .75rem;
+  padding: .6rem 1rem;
+  border-left: 3px solid var(--accent);
+  background: rgba(124,106,255,.06);
+  border-radius: 0 var(--radius) var(--radius) 0;
+}
+
+/* Code block */
+.code-block {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 1.1rem 1.4rem;
+  font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+  font-size: .79rem;
+  line-height: 1.8;
+  white-space: pre;
+  overflow-x: auto;
+  margin: 1rem 0;
+}
+
+/* Reference tables */
+.ref-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: .83rem;
+  margin: 1rem 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+.ref-table th {
+  background: var(--surface);
+  text-align: left;
+  padding: .5rem 1rem;
+  font-size: .72rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: .07em;
+  color: var(--muted);
+  border-bottom: 1px solid var(--border);
+}
+.ref-table td {
+  padding: .55rem 1rem;
+  border-bottom: 1px solid var(--border);
+  vertical-align: top;
+}
+.ref-table tr:last-child td { border-bottom: none; }
+.ref-table code {
+  font-family: 'SF Mono', 'Fira Code', monospace;
+  font-size: .78rem;
+  color: var(--accent2);
+}
+.ref-table .method {
+  font-family: 'SF Mono', 'Fira Code', monospace;
+  font-size: .78rem;
+  font-weight: 600;
+  color: var(--green);
+}
+.ref-table .dim { color: var(--muted); font-size: .78rem; }
+
+/* Delete button (user page) */
+.btn-delete {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--muted);
+  border-radius: 6px;
+  width: 28px; height: 28px;
+  cursor: pointer;
+  font-size: .85rem;
+  display: flex; align-items: center; justify-content: center;
+  transition: border-color .15s, color .15s;
+  margin-left: auto;
+}
+.btn-delete:hover { border-color: #f87171; color: #f87171; }

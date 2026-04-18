@@ -16,11 +16,13 @@
 // =====================================================================
 // In-memory file cache — โหลดทุกไฟล์ใน public/ ตอน startup
 // GET /style.css → serve จาก RAM ไม่แตะ disk เลย
+// resp เก็บ full HTTP response (headers + body) pre-built ที่ startup
+// → ไม่ต้อง snprintf ต่อ request อีกต่อไป
 // =====================================================================
 typedef struct {
     char        url[512];    // เช่น "/style.css"
-    char       *data;        // file content
-    size_t      size;
+    char       *resp;        // "HTTP/1.1 200 OK\r\n...\r\n\r\n<file>"
+    size_t      resp_len;
     const char *mime;
 } CachedFile;
 
@@ -42,6 +44,9 @@ static const char *mime_of(const char *path) {
     return "application/octet-stream";
 }
 
+// header template สูงสุด ~200 bytes
+#define HDR_MAX 256
+
 static void cache_file(const char *filepath, const char *url) {
     if (cache_count >= MAX_FILES) return;
 
@@ -54,25 +59,37 @@ static void cache_file(const char *filepath, const char *url) {
         close(fd); return;
     }
 
-    char *buf = malloc((size_t)st.st_size + 1);
-    if (!buf) { close(fd); return; }
+    const char *mime = mime_of(url);
 
-    ssize_t n = read(fd, buf, (size_t)st.st_size);
+    // สร้าง HTTP header ครั้งเดียว
+    char hdr[HDR_MAX];
+    int hlen = snprintf(hdr, HDR_MAX,
+        "HTTP/1.1 200 OK\r\nContent-Type: %s\r\n"
+        "Content-Length: %lld\r\nConnection: keep-alive\r\n\r\n",
+        mime, (long long)st.st_size);
+    if (hlen <= 0 || hlen >= HDR_MAX) { close(fd); return; }
+
+    // alloc: header + file content (ไม่ต้อง +1 สำหรับ null เพราะเป็น binary-safe)
+    char *resp = malloc((size_t)hlen + (size_t)st.st_size);
+    if (!resp) { close(fd); return; }
+
+    memcpy(resp, hdr, (size_t)hlen);
+    ssize_t n = read(fd, resp + hlen, (size_t)st.st_size);
     close(fd);
-    if (n < 0) { free(buf); return; }
-    buf[n] = '\0';
+    if (n < 0) { free(resp); return; }
 
     CachedFile *cf = &cache[cache_count++];
     memcpy(cf->url, url, strlen(url) + 1);
-    cf->data = buf;
-    cf->size = (size_t)n;
-    cf->mime = mime_of(url);
+    cf->resp     = resp;
+    cf->resp_len = (size_t)hlen + (size_t)n;
+    cf->mime     = mime;
 
-    printf("[static] cached %-30s %zu bytes\n", url, cf->size);
+    printf("[static] cached %-30s %zu bytes\n", url, (size_t)n);
 }
 
 // =====================================================================
 // Static File Handler — O(n) lookup แต่ไฟล์น้อย (< 64) → ไม่เป็นไร
+// serve ด้วย set_raw_response → memcpy เท่านั้น ไม่มี snprintf ต่อ request
 // =====================================================================
 static void static_serve(const char *url_path, int socket_fd) {
     if (strstr(url_path, "..") || strstr(url_path, "//")) {
@@ -80,9 +97,9 @@ static void static_serve(const char *url_path, int socket_fd) {
         return;
     }
 
-    for (int i = 0; i < cache_count; i++) {  // O(n) — ไฟล์น้อย (<64) รับได้
+    for (int i = 0; i < cache_count; i++) {
         if (strcmp(cache[i].url, url_path) == 0) {
-            send_response(socket_fd, 200, "OK", cache[i].mime, cache[i].data);
+            set_raw_response(cache[i].resp, cache[i].resp_len);
             return;
         }
     }

@@ -2,7 +2,8 @@
 FROM ubuntu:24.04 AS builder
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    build-essential git ca-certificates liblmdb-dev libnghttp2-dev \
+    build-essential git ca-certificates python3 \
+    liblmdb-dev libnghttp2-dev libcurl4-openssl-dev \
     && rm -rf /var/lib/apt/lists/*
 
 # Build liburing จาก source เพื่อให้ได้ recv_fixed / send_fixed
@@ -16,11 +17,21 @@ WORKDIR /app
 COPY . .
 RUN mkdir -p data && make clean && make
 
+# ── Lib Stage — export libcnext.a + headers ───────────────────────────
+# docker build --target=libonly -t cnext-lib .
+# docker create --name _lib cnext-lib
+# docker cp _lib:/dist/. ./dist && docker rm _lib
+FROM ubuntu:24.04 AS libonly
+WORKDIR /dist
+COPY --from=builder /app/libcnext.a .
+COPY --from=builder /app/lib/*.h    include/
+COPY --from=builder /app/lib/db/*.h include/db/
+
 # ── Runtime Stage ─────────────────────────────────────────────────────
 FROM ubuntu:24.04
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    liblmdb0 libnghttp2-14 \
+    liblmdb0 libnghttp2-14 libcurl4 ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
 # copy liburing .so จาก builder
@@ -34,7 +45,6 @@ WORKDIR /app
 COPY --from=builder /app/server .
 
 # assets ที่ server อ่านตอน runtime (lib/ และ src/ เป็น compile-time เท่านั้น)
-COPY --from=builder /app/layouts/ ./layouts/
 COPY --from=builder /app/public/  ./public/
 
 RUN mkdir -p data
