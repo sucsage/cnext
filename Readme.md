@@ -90,7 +90,7 @@ One `src/layout.cxn` wraps every page at the `{{children}}` marker — no explic
 </html>
 ```
 
-If `layout.cxn` is absent, pages render standalone via a weak default in `lib_dev/pages.c`.
+If `layout.cxn` is absent, pages render standalone via a weak default in `lib/include/pages.h`.
 
 ---
 
@@ -177,7 +177,7 @@ docker run --rm -p 8080:8080 \
   cnext
 ```
 
-> **macOS:** io_uring is Linux-only. Always build and run via Docker.
+> **macOS, Windows:** io_uring is Linux-only. Always build and run via Docker.
 
 ---
 
@@ -190,35 +190,7 @@ make dev          # docker compose up (watch + rebuild + restart)
 make dev-down     # stop the dev container
 ```
 
-`src/`, `lib_dev/`, `main.c`, `Makefile`, `tools/` are bind-mounted — edits on the host trigger a rebuild inside the container.
-
----
-
-## Build Modes
-
-The framework ships the library as a prebuilt static archive so `lib_dev/*.c` stays private.
-
-| Mode | When | How `make` resolves `libcnext.a` |
-|------|------|----------------------------------|
-| **source** | `lib_dev/` present on disk (dev machine) | Compile `lib_dev/*.c` → `libcnext.a` |
-| **consumer** | `lib_dev/` absent (EC2, GitHub clone, CI) | Link `lib/libcnext.a` with `-Ilib/include` |
-
-`lib_dev/` is gitignored — it is never pushed to GitHub. `lib/libcnext.a` + `lib/include/` is what the public repo ships.
-
-### Dev workflow (push to GitHub)
-
-```bash
-# 1. edit lib_dev/*.c
-# 2. refresh the published artifact
-make lib-pack           # Linux
-make pack-docker        # macOS (builds in Docker, copies back)
-# 3. commit lib/ and push
-git add lib src
-git commit && git push
-```
-
-The GitHub Action verifies `lib/libcnext.a` exists before deploy — forgetting `pack` fails the build.
-
+`src/`, `lib/`, `main.c`, `Makefile`, `tools/` are bind-mounted — edits on the host trigger a rebuild inside the container.
 ---
 
 ## Project Structure
@@ -235,7 +207,7 @@ src/
     
 lib/                    (public artifact — committed)
   libcnext.a            prebuilt static library
-  include/              public headers (mirror of lib_dev/*.h)
+  include/              public headers
 
 .cnext/                 (gitignored — cxnc build output, like .next in Next.js)
   src/**/*_cxn.c        generated from src/**/*.cxn
