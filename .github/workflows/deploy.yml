@@ -40,6 +40,12 @@ jobs:
             echo "=== Pull latest code ==="
             git pull origin main
 
+            echo "=== Ensure build deps ==="
+            # only install deps that aren't already present (liburing is built from
+            # source to /usr/local — don't let apt shadow it with an older version)
+            dpkg -s libcurl4-openssl-dev >/dev/null 2>&1 || \
+              sudo apt-get install -y --no-install-recommends libcurl4-openssl-dev
+
             echo "=== Build (consumer mode — uses plib/libcnext.a) ==="
             make clean && make
 
