@@ -229,6 +229,19 @@ Cold writes are async. `db_scan` / `db_list` call `cold_flush()` internally befo
 
 ## HTTP Fetch
 
+Four APIs — pick by context:
+
+| API | Blocks? | Cached | Use from |
+|---|---|---|---|
+| `cxn_fetch` | yes | no | action handlers (they block anyway — user waits for redirect) |
+| `cxn_fetch_async` | no | no | fire-and-forget (analytics, webhooks) |
+| `cxn_fetch_cached` | no | yes (raw body) | `page.cxn` render path |
+| `cxn_fetch_cached_typed` | no | yes (parsed struct) | `page.cxn` — zero-parse hit path |
+
+All async/cached calls share an internal **thread pool** (4 workers by default) + **in-RAM cache** with **stale-while-revalidate**. Thread-local `CURL` handle reuses TCP/TLS keep-alive across calls.
+
+### Blocking — `cxn_fetch`
+
 ```c
 #include "fetch.h"
 
@@ -239,7 +252,91 @@ if (fr) {
 }
 ```
 
-`cxn_fetch` is blocking — call from a background thread to avoid blocking io_uring workers.
+Supports `"GET"`, `"POST"`, `"PUT"`, `"PATCH"`, `"DELETE"` (or any custom method). `body` is `NULL` for GET/DELETE. **Never call from a page render** — it will block the io_uring worker.
+
+### Fire-and-forget — `cxn_fetch_async`
+
+```c
+cxn_fetch_async("https://analytics.example.com/event", "POST",
+                "{\"event\":\"page_view\"}", NULL, NULL);
+```
+
+Returns instantly. Optional callback runs on a worker thread when done — do not touch the originating request's `PageCtx` or socket from inside.
+
+### Cached raw body — `cxn_fetch_cached`
+
+```c
+<% char *data = cxn_fetch_cached("https://api.example.com/todos", 60); %>
+<div>{{ data ? data : "loading..." }}</div>
+<% free(data); %>
+```
+
+- **Fresh hit** (< `ttl`) → returns `strdup(body)` immediately
+- **Stale hit** (`ttl` ≤ age < `2×ttl`) → returns stale copy + spawns background refresh
+- **Miss** → returns `NULL` + spawns background fetch; next request gets data
+
+Caller always `free()`s the returned string.
+
+### Cached typed — `cxn_fetch_cached_typed`
+
+Parse JSON into a struct once, cache the binary struct, render path is pure `memcpy`.
+
+```c
+<%inc fetch.h %>
+
+<%!
+typedef struct {
+    int  userId;
+    int  id;
+    char title[256];
+    int  completed;
+} Todo;
+
+static const FetchField TODO_FIELDS[] = {
+    {"userId",    F_INT,  offsetof(Todo, userId),    0},
+    {"id",        F_INT,  offsetof(Todo, id),        0},
+    {"title",     F_STR,  offsetof(Todo, title),     sizeof(((Todo*)0)->title)},
+    {"completed", F_BOOL, offsetof(Todo, completed), 0},
+};
+#define TODO_NFIELDS (sizeof(TODO_FIELDS)/sizeof(TODO_FIELDS[0]))
+%>
+
+<% Todo t = {0};
+   int ok = cxn_fetch_cached_typed(
+       "https://jsonplaceholder.typicode.com/todos/1", 60,
+       &t, sizeof(t), TODO_FIELDS, TODO_NFIELDS);
+%>
+
+<div>
+  <% if (ok) { %>
+    <div>#{{t.id}} — {{t.title}}</div>
+    <div>{{ t.completed ? "done" : "pending" }}</div>
+  <% } else { %>
+    <div>loading...</div>
+  <% } %>
+</div>
+```
+
+Field types: `F_STR` (char array in-struct), `F_INT`, `F_I64`, `F_F64`, `F_BOOL`. Nested JSON objects/arrays are skipped — declare only the top-level keys you need.
+
+### Standalone JSON parse — `cxn_json_parse`
+
+If you already have a body string:
+
+```c
+Todo t = {0};
+cxn_json_parse(body, len, &t, TODO_FIELDS, TODO_NFIELDS);
+```
+
+One-pass tokenizer, zero heap allocation.
+
+### Performance notes
+
+- Cached hit path: hash lookup + `memcpy` → sub-µs (no JSON re-parse)
+- Thread pool shares a 1024-slot hash cache (FNV-1a, open-addressing)
+- In-flight dedup: 1000 concurrent requests for the same URL fire **one** backend call
+- TLS/TCP keep-alive is reused per worker thread via `curl_easy_reset` on a pinned `CURL *`
+- Stale-while-revalidate: users never block on a refresh — they always get fresh or stale-served data
 
 ---
 
