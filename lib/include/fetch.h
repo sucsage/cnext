@@ -4,16 +4,29 @@
 #include <stddef.h>
 
 // =====================================================================
-// cxn_fetch — HTTP client (libcurl wrapper) + in-RAM cache + JSON parse
+// cxn_fetch — unified HTTP client (libcurl) + cache + JSON parse
+// ---------------------------------------------------------------------
+// One function, one options struct. Cache / wait / parse / async are
+// orthogonal axes controlled by FetchOpts fields. Use C99 designated
+// initializers so you only spell out the axes you need.
 //
-// APIs:
-//   1) cxn_fetch              — blocking (use from action handlers only)
-//   2) cxn_fetch_async        — fire-and-forget, any method, optional cb
-//   3) cxn_fetch_cached       — GET only, non-blocking, cached raw body
-//   4) cxn_fetch_cached_typed — GET only, non-blocking, JSON → user struct
+//   Blocking raw (action handler):
+//     FetchResult *r = NULL;
+//     cxn_fetch(url, &(FetchOpts){ .wait_ms = FETCH_BLOCK,
+//                                  .out_result = &r });
 //
-// Event-loop workers (page render) ต้องใช้ cached/async เท่านั้น —
-// ห้ามเรียก cxn_fetch ตรง ๆ เพราะจะ block io_uring worker.
+//   Cached typed + wait on cold cache (Next.js-style SSR):
+//     Todo t = {0};
+//     int ok = cxn_fetch(url, &(FetchOpts){
+//         .ttl       = 60,
+//         .wait_ms   = 500,
+//         .out       = &t, .out_size = sizeof(t),
+//         .fields    = TODO_FIELDS, .nfields = TODO_NFIELDS,
+//     });
+//
+//   Fire-and-forget POST:
+//     cxn_fetch(url, &(FetchOpts){
+//         .method = "POST", .body = json, .async = 1 });
 // =====================================================================
 
 typedef struct {
@@ -22,40 +35,11 @@ typedef struct {
     int    status;  // HTTP status code
 } FetchResult;
 
-// ---------------------------------------------------------------------
-// Blocking
-// ---------------------------------------------------------------------
-// method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE" (or any custom)
-// body:   request body for POST/PUT/PATCH — NULL สำหรับ GET/DELETE
-// คืน NULL ถ้า network error / OOM
-FetchResult *cxn_fetch(const char *url, const char *method, const char *body);
-void         fetch_free(FetchResult *r);
+void fetch_free(FetchResult *r);
 
 // ---------------------------------------------------------------------
-// Async fire-and-forget — ส่งงานเข้า thread pool, คืนทันที
+// JSON field descriptor — used by .out / .fields parsing
 // ---------------------------------------------------------------------
-// method/body เหมือน cxn_fetch
-// cb (optional) ถูกเรียกใน worker thread เมื่อ fetch เสร็จ — r อาจ NULL
-// *** อย่าเข้าถึง PageCtx หรือ socket ของ request ต้นทาง จาก cb ***
-typedef void (*FetchCallback)(FetchResult *r, void *user);
-void cxn_fetch_async(const char *url, const char *method, const char *body,
-                     FetchCallback cb, void *user);
-
-// ---------------------------------------------------------------------
-// Cached GET (raw body) — non-blocking
-// ---------------------------------------------------------------------
-// Fresh hit  → คืน strdup(body)  (caller free)
-// Stale hit  → คืน strdup(body) + spawn bg refresh (stale-while-revalidate)
-// Miss       → คืน NULL + spawn bg fetch; request ถัดไปจะได้ data
-// ttl_seconds = อายุที่ถือว่า "fresh" — หลังจากนั้นยัง serve ได้อีก 2×ttl
-// เป็น stale (bg refresh ระหว่างนั้น) ก่อน evict จริง
-char *cxn_fetch_cached(const char *url, int ttl_seconds);
-
-// ---------------------------------------------------------------------
-// Cached typed GET — fetch + parse JSON → struct, cache binary struct
-// ---------------------------------------------------------------------
-// เก็บ struct ที่ parse แล้วใน cache → hit path = memcpy (ไม่ re-parse)
-// คืน 1 = hit/success (out ถูกเติม), 0 = miss (bg fetch started)
 typedef enum {
     F_STR,   // char[cap] in-struct
     F_INT,   // int
@@ -68,18 +52,65 @@ typedef struct {
     const char    *key;       // JSON key to match
     FetchFieldType type;
     size_t         offset;    // offsetof(YourStruct, field)
-    size_t         cap;       // string cap (sizeof field); 0 for non-string
+    size_t         cap;       // string cap; 0 for non-string
 } FetchField;
 
-int cxn_fetch_cached_typed(const char *url, int ttl_seconds,
-                           void *out, size_t out_size,
-                           const FetchField *fields, size_t nfields);
+// ---------------------------------------------------------------------
+// Async callback — runs on a worker thread; do NOT touch the originating
+// request's PageCtx/socket from inside.
+// ---------------------------------------------------------------------
+typedef void (*FetchCallback)(FetchResult *r, void *user);
 
 // ---------------------------------------------------------------------
-// JSON parse (standalone — for when you already have a body string)
+// Wait mode sentinels
 // ---------------------------------------------------------------------
-// Parse flat JSON object at top level, extract declared fields.
-// Nested objects/arrays are skipped. Returns # fields populated.
+enum {
+    FETCH_NOWAIT = 0,      // miss → return 0 immediately; bg fetch starts
+    FETCH_BLOCK  = -1,     // block until done (no timeout)
+};
+
+// ---------------------------------------------------------------------
+// FetchOpts — every field defaults to zero (safe: GET, no cache, no wait)
+// ---------------------------------------------------------------------
+typedef struct {
+    // Request
+    const char *method;          // default "GET"
+    const char *body;            // request body (POST/PUT/PATCH)
+
+    // Caching — 0 = disabled. stale-while-revalidate: stale serves up to 2×ttl.
+    int ttl;
+
+    // Wait on cache miss — FETCH_NOWAIT | >0 ms | FETCH_BLOCK
+    int wait_ms;
+
+    // Fire-and-forget. Overrides wait_ms. cb (if set) runs in worker thread.
+    int           async;
+    FetchCallback cb;
+    void         *user;
+
+    // Output — any combination:
+    //   out_result set → *out_result = malloc'd FetchResult (fetch_free after)
+    //   out + out_size + fields + nfields set → parsed struct written to out
+    FetchResult      **out_result;
+    void              *out;
+    size_t             out_size;
+    const FetchField  *fields;
+    size_t             nfields;
+} FetchOpts;
+
+// ---------------------------------------------------------------------
+// The one function.
+//
+// Returns:
+//   1 = data available (out / out_result populated)
+//   0 = miss — no data this call (wait_ms expired, or async started)
+//  -1 = error (network / parse / OOM)
+// ---------------------------------------------------------------------
+int cxn_fetch(const char *url, const FetchOpts *opts);
+
+// ---------------------------------------------------------------------
+// Standalone JSON parse (when you already have a body string)
+// ---------------------------------------------------------------------
 int cxn_json_parse(const char *body, size_t len, void *out,
                    const FetchField *fields, size_t nfields);
 

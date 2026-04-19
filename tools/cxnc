@@ -64,6 +64,7 @@ def process(src_path, dst_path):
     scope_lines = []
     body_lines = []
     in_scope = False
+    in_code = False                  # inside a multi-line <% ... %> block
     has_children_marker = False
 
     META_KEYS = ('title', 'description', 'og_image', 'canonical')
@@ -119,10 +120,28 @@ def process(src_path, dst_path):
                 meta[key] = esc(val)
             continue
 
+        # ── <% ... %> multi-line C code (close with %> on its own line) ──
+        if in_code:
+            if line.strip() == '%>':
+                in_code = False
+            else:
+                body_lines.append(('raw', line))
+            continue
+
         # ── <% single-line C code %> ─────────────────────────────────────
         m = re.match(r'^\s*<%(.+?)%>\s*$', line)
         if m:
             body_lines.append(('raw', m.group(1).strip()))
+            continue
+
+        # ── <% opens a multi-line code block (no closing %> on this line) ─
+        m = re.match(r'^\s*<%(.*)$', line)
+        if m and '%>' not in line and not line.lstrip().startswith('<%!') \
+                and not line.lstrip().startswith('<%inc'):
+            in_code = True
+            rest = m.group(1)
+            if rest.strip():
+                body_lines.append(('raw', rest))
             continue
 
         # ── บรรทัดที่มี {{expr}} หรือ {{children}} ───────────────────────

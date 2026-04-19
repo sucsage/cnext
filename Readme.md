@@ -104,8 +104,8 @@ static void render_card(const char *key, const char *val, void *arg) {
 | `@meta key "value"` | Per-page metadata (`title`, `description`, `og_image`, `canonical`) |
 | `{{children}}` | (in `layout.cxn` only) slot where the page body renders |
 | `<%! ... %>` | C code at file scope (close with `%>` on its own line) |
-| `<% code; %>` | C code inside `render()` |
-| `{{expr}}` | `page_writef(ctx, "%s", expr)` |
+| `<% code; %>` | C code inside `render()` — single-line or multi-line (close with `%>` on its own line) |
+| `{{expr}}` | `page_writef(ctx, "%s", expr)` — **string only**; use `<% page_writef(ctx, "%d", x); %>` for ints/floats |
 | plain HTML | `page_write(ctx, "...\n")` |
 
 ### Layout
@@ -229,57 +229,41 @@ Cold writes are async. `db_scan` / `db_list` call `cold_flush()` internally befo
 
 ## HTTP Fetch
 
-Four APIs — pick by context:
+One function, one options struct: `cxn_fetch(url, &opts)`. Cache, wait-on-miss, JSON parsing, and fire-and-forget are orthogonal fields on `FetchOpts`. Use C99 designated initializers so you only spell out the axes you need — every field defaults to a safe zero.
 
-| API | Blocks? | Cached | Use from |
-|---|---|---|---|
-| `cxn_fetch` | yes | no | action handlers (they block anyway — user waits for redirect) |
-| `cxn_fetch_async` | no | no | fire-and-forget (analytics, webhooks) |
-| `cxn_fetch_cached` | no | yes (raw body) | `page.cxn` render path |
-| `cxn_fetch_cached_typed` | no | yes (parsed struct) | `page.cxn` — zero-parse hit path |
+### Usage matrix
 
-All async/cached calls share an internal **thread pool** (4 workers by default) + **in-RAM cache** with **stale-while-revalidate**. Thread-local `CURL` handle reuses TCP/TLS keep-alive across calls.
+| Goal | Opts |
+|---|---|
+| Blocking raw (action handler) | `.wait_ms=FETCH_BLOCK, .out_result=&r` |
+| Fire-and-forget POST | `.method="POST", .body=json, .async=1` |
+| Cached raw (non-blocking) | `.ttl=60, .out_result=&r` |
+| Cached typed (non-blocking, zero-parse hit) | `.ttl=60, .out=&t, .out_size=sizeof(t), .fields=F, .nfields=N` |
+| **Cached typed + wait on cold cache** (Next.js SSR) | `.ttl=60, .wait_ms=500, .out=&t, ...` |
+| Async with completion callback | `.async=1, .cb=my_cb, .user=ctx` |
 
-### Blocking — `cxn_fetch`
+### Return value
+
+- `1` — data available (`out` / `out_result` populated)
+- `0` — miss (wait_ms expired, or async started)
+- `-1` — error
+
+### Examples
+
+Blocking (use from `action.c` — they block anyway while user waits for redirect):
 
 ```c
 #include "fetch.h"
 
-FetchResult *fr = cxn_fetch("https://api.example.com/data", "GET", NULL);
-if (fr) {
-    // fr->body, fr->len, fr->status
-    fetch_free(fr);
-}
+FetchResult *r = NULL;
+cxn_fetch("https://api.example.com/data", &(FetchOpts){
+    .wait_ms    = FETCH_BLOCK,
+    .out_result = &r,
+});
+if (r) { /* r->body, r->len, r->status */ fetch_free(r); }
 ```
 
-Supports `"GET"`, `"POST"`, `"PUT"`, `"PATCH"`, `"DELETE"` (or any custom method). `body` is `NULL` for GET/DELETE. **Never call from a page render** — it will block the io_uring worker.
-
-### Fire-and-forget — `cxn_fetch_async`
-
-```c
-cxn_fetch_async("https://analytics.example.com/event", "POST",
-                "{\"event\":\"page_view\"}", NULL, NULL);
-```
-
-Returns instantly. Optional callback runs on a worker thread when done — do not touch the originating request's `PageCtx` or socket from inside.
-
-### Cached raw body — `cxn_fetch_cached`
-
-```c
-<% char *data = cxn_fetch_cached("https://api.example.com/todos", 60); %>
-<div>{{ data ? data : "loading..." }}</div>
-<% free(data); %>
-```
-
-- **Fresh hit** (< `ttl`) → returns `strdup(body)` immediately
-- **Stale hit** (`ttl` ≤ age < `2×ttl`) → returns stale copy + spawns background refresh
-- **Miss** → returns `NULL` + spawns background fetch; next request gets data
-
-Caller always `free()`s the returned string.
-
-### Cached typed — `cxn_fetch_cached_typed`
-
-Parse JSON into a struct once, cache the binary struct, render path is pure `memcpy`.
+Cached typed with **wait-on-miss** — the first visitor to a cold cache pays ~100ms of upstream latency and gets populated HTML; subsequent visitors get sub-µs cache hits:
 
 ```c
 <%inc fetch.h %>
@@ -302,14 +286,18 @@ static const FetchField TODO_FIELDS[] = {
 %>
 
 <% Todo t = {0};
-   int ok = cxn_fetch_cached_typed(
-       "https://jsonplaceholder.typicode.com/todos/1", 60,
-       &t, sizeof(t), TODO_FIELDS, TODO_NFIELDS);
+   int ok = cxn_fetch("https://jsonplaceholder.typicode.com/todos/1",
+                      &(FetchOpts){
+                          .ttl     = 60,
+                          .wait_ms = 500,
+                          .out     = &t, .out_size = sizeof(t),
+                          .fields  = TODO_FIELDS, .nfields = TODO_NFIELDS,
+                      });
 %>
 
 <div>
   <% if (ok) { %>
-    <div>#{{t.id}} — {{t.title}}</div>
+    <% page_writef(ctx, "<div>#%d — %s</div>", t.id, t.title); %>
     <div>{{ t.completed ? "done" : "pending" }}</div>
   <% } else { %>
     <div>loading...</div>
@@ -317,9 +305,30 @@ static const FetchField TODO_FIELDS[] = {
 </div>
 ```
 
-Field types: `F_STR` (char array in-struct), `F_INT`, `F_I64`, `F_F64`, `F_BOOL`. Nested JSON objects/arrays are skipped — declare only the top-level keys you need.
+Fire-and-forget POST (analytics, webhooks):
 
-### Standalone JSON parse — `cxn_json_parse`
+```c
+cxn_fetch("https://analytics.example.com/event", &(FetchOpts){
+    .method = "POST",
+    .body   = "{\"event\":\"page_view\"}",
+    .async  = 1,
+});
+```
+
+### Opts fields
+
+| Field | Purpose |
+|---|---|
+| `method` | `"GET"` (default), `"POST"`, `"PUT"`, `"PATCH"`, `"DELETE"`, or any custom |
+| `body` | Request body (POST/PUT/PATCH); `NULL` otherwise |
+| `ttl` | Cache window (sec); `0` disables cache. Stale-while-revalidate up to `2×ttl` |
+| `wait_ms` | Behavior on cache miss: `FETCH_NOWAIT` (0), `>0` = block up to N ms, `FETCH_BLOCK` = block forever |
+| `async` | Fire-and-forget — returns `0` immediately; `cb` (if set) runs in a worker thread |
+| `cb` / `user` | Callback for async; **do not touch the originating request's `PageCtx`/socket** |
+| `out_result` | `FetchResult**` — raw body + status; caller must `fetch_free` |
+| `out` / `out_size` / `fields` / `nfields` | Parse JSON into a struct; cache stores the parsed binary so hit path is pure `memcpy` |
+
+### Standalone JSON parse
 
 If you already have a body string:
 
@@ -328,15 +337,16 @@ Todo t = {0};
 cxn_json_parse(body, len, &t, TODO_FIELDS, TODO_NFIELDS);
 ```
 
-One-pass tokenizer, zero heap allocation.
+Field types: `F_STR` (char array in-struct), `F_INT`, `F_I64`, `F_F64`, `F_BOOL`. Nested JSON objects/arrays are skipped — declare only the top-level keys you need. One-pass tokenizer, zero heap allocation.
 
 ### Performance notes
 
-- Cached hit path: hash lookup + `memcpy` → sub-µs (no JSON re-parse)
-- Thread pool shares a 1024-slot hash cache (FNV-1a, open-addressing)
-- In-flight dedup: 1000 concurrent requests for the same URL fire **one** backend call
-- TLS/TCP keep-alive is reused per worker thread via `curl_easy_reset` on a pinned `CURL *`
-- Stale-while-revalidate: users never block on a refresh — they always get fresh or stale-served data
+- Internal thread pool (4 workers by default) + 1024-slot hash cache (FNV-1a, open-addressing)
+- Cache stores the **parsed binary struct** for typed fetches → hit path = `memcpy`, no JSON re-parse
+- Per-thread `CURL *` handle reuses TCP/TLS keep-alive across calls (saves ~50–200ms per request)
+- In-flight dedup: 1000 concurrent requests for the same URL fire **one** upstream call
+- Stale-while-revalidate: users never block on a refresh — they always get fresh or stale-served data while the bg worker refills the cache
+- `wait_ms>0` uses a `pthread_cond_timedwait` on a global condvar broadcast by workers on cache store — no busy-polling
 
 ---
 

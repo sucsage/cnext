@@ -185,19 +185,33 @@ char *list = db_list("ns");            // returns JSON "[v1,v2,...]"; free() aft
 
     <div class="docs-section" id="fetch">
       <h2 class="docs-h2">HTTP Fetch</h2>
-      <p class="docs-p">Use <code>cxn_fetch()</code> for server-side HTTP requests via libcurl. It is blocking — call it from a background thread to avoid stalling io_uring workers.</p>
+      <p class="docs-p">One function, one options struct. <code>cxn_fetch(url, &amp;opts)</code> handles caching, JSON parsing, wait-on-miss and fire-and-forget via orthogonal fields in <code>FetchOpts</code>. Use C99 designated initializers so you only spell out the axes you need.</p>
       <div class="code-block">#include "fetch.h"
 
-FetchResult *fr = cxn_fetch("https://api.example.com/data", "GET", NULL);
-if (fr) {
-    // fr-&gt;body    null-terminated response body
-    // fr-&gt;len     byte length
-    // fr-&gt;status  HTTP status code (200, 404, …)
-    fetch_free(fr);
-}
+// Blocking raw (action handler) — replaces old cxn_fetch()
+FetchResult *r = NULL;
+cxn_fetch(url, &amp;(FetchOpts){ .wait_ms = FETCH_BLOCK, .out_result = &amp;r });
+if (r) { /* r-&gt;body, r-&gt;status */ fetch_free(r); }
 
-// POST with a body
-FetchResult *fr2 = cxn_fetch("https://api.example.com/submit", "POST", "key=value");</div>
+// Cached typed + wait on cold cache (Next.js-style SSR)
+Todo t = {0};
+int ok = cxn_fetch(url, &amp;(FetchOpts){
+    .ttl     = 60,
+    .wait_ms = 500,                    // block up to 500ms on cold cache
+    .out     = &amp;t, .out_size = sizeof(t),
+    .fields  = TODO_FIELDS, .nfields = TODO_NFIELDS,
+});
+
+// Fire-and-forget POST (analytics)
+cxn_fetch(url, &amp;(FetchOpts){ .method = "POST", .body = json, .async = 1 });</div>
+      <table class="ref-table">
+        <tr><th>Opts field</th><th>Purpose</th></tr>
+        <tr><td><code>ttl</code></td><td>Cache window (sec); 0 disables cache. Stale-while-revalidate up to 2×ttl.</td></tr>
+        <tr><td><code>wait_ms</code></td><td><code>0</code>=nowait, <code>&gt;0</code>=block ms on miss, <code>FETCH_BLOCK</code>=block forever</td></tr>
+        <tr><td><code>async</code></td><td>Fire-and-forget; returns 0 immediately, <code>cb</code> runs in worker</td></tr>
+        <tr><td><code>out_result</code></td><td><code>FetchResult**</code> — raw body + status (caller <code>fetch_free</code>s)</td></tr>
+        <tr><td><code>out</code> / <code>fields</code></td><td>Parse JSON into a struct; cache stores the parsed binary (hit path = <code>memcpy</code>)</td></tr>
+      </table>
     </div>
 
   </div>
