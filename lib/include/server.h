@@ -27,6 +27,11 @@ typedef struct {
 int setup_server(int port);
 void accept_clients(int server_fd, int port);
 
+// TLS listener — spawns a blocking-IO worker thread that terminates TLS
+// (OpenSSL + kTLS) on `port` and dispatches to the same request handlers
+// as the plaintext HTTP/1.1 path. No-op when TLS_ENABLED=0.
+void start_tls_listener(int port);
+
 // ฟังก์ชันสำหรับ Router (additive — ไม่ล้าง table เดิม)
 void register_routes(Route *routes, size_t count);
 

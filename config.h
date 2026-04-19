@@ -12,6 +12,17 @@
 // a rebuild from source. Treat it as documentation of the defaults.
 // =====================================================================
 
+// ── server.c — listener ports + TLS toggle ───────────────────────────
+#ifndef HTTP_PORT
+#define HTTP_PORT        8080      // plaintext HTTP/1.1 + HTTP/2 (h2c) listener
+#endif
+#ifndef TLS_PORT
+#define TLS_PORT         8443      // HTTPS listener (ALPN → h2 or http/1.1)
+#endif
+#ifndef TLS_ENABLED
+#define TLS_ENABLED      0         // compile out with -DTLS_ENABLED=0
+#endif
+
 // ── server.c — io_uring + connection pool ────────────────────────────
 #ifndef BUFFER_SIZE
 #define BUFFER_SIZE      8192      // per-conn recv buffer

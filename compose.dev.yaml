@@ -5,6 +5,7 @@ services:
       target: dev
     ports:
       - "8080:8080"
+      - "8443:8443"
     volumes:
       - ./src:/app/src
       - ./lib:/app/lib
@@ -13,6 +14,7 @@ services:
       - ./tools:/app/tools
       - ./public:/app/public
       - ./data:/app/data
+      - ./certs:/app/certs:ro
     security_opt:
       - seccomp:unconfined   # io_uring syscalls
     cap_add:

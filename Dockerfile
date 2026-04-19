@@ -4,8 +4,8 @@
 FROM ubuntu:24.04 AS deps
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    build-essential git ca-certificates python3 \
-    liblmdb-dev libnghttp2-dev libcurl4-openssl-dev \
+    build-essential git ca-certificates python3 xxd openssl \
+    liblmdb-dev libnghttp2-dev libcurl4-openssl-dev libssl-dev \
     && rm -rf /var/lib/apt/lists/*
 
 # Build liburing จาก source เพื่อให้ได้ recv_fixed / send_fixed
@@ -35,14 +35,14 @@ RUN mkdir -p data \
 # which doesn't forward inotify events from host file edits.
 FROM builder AS dev
 WORKDIR /app
-EXPOSE 8080
+EXPOSE 8080 8443
 CMD ["sh", "tools/dev-watch.sh"]
 
 # ── Runtime Stage ─────────────────────────────────────────────────────
 FROM ubuntu:24.04
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    liblmdb0 libnghttp2-14 libcurl4 ca-certificates \
+    liblmdb0 libnghttp2-14 libcurl4 libssl3 ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
 # copy liburing .so จาก builder
@@ -60,7 +60,7 @@ COPY --from=builder /app/public/  ./public/
 
 RUN mkdir -p data
 
-EXPOSE 8080
+EXPOSE 8080 8443
 
 # วิธี run (full performance):
 #   docker run --rm -p 8080:8080 \

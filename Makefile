@@ -1,6 +1,6 @@
 CC          = gcc
 CFLAGS      = -O3 -march=native -Wall -Wextra -pthread -I. -Ilib/include -I/usr/local/include
-LDFLAGS     = -L/usr/local/lib -luring -llmdb -lnghttp2 -lcurl
+LDFLAGS     = -L/usr/local/lib -luring -llmdb -lnghttp2 -lcurl -lssl -lcrypto
 TARGET      = server
 LIB_A       = lib/libcnext.a
 
@@ -38,6 +38,7 @@ $(TARGET): $(APP_SRC) $(LIB_A)
 
 # Live-reload dev server — edit files and the browser auto-refreshes
 dev:
+	@mkdir -p certs
 	docker compose -f compose.dev.yaml up --build
 
 dev-down:
@@ -46,13 +47,18 @@ dev-down:
 # Production build + run
 start:
 	docker build -t cnext .
-	docker run --rm -p 8080:8080 \
+	docker run --rm -p 8080:8080 -p 8443:8443 \
 		-v $(PWD)/data:/app/data \
+		-v $(PWD)/certs:/app/certs:ro \
 		--security-opt seccomp=unconfined \
 		--cap-add SYS_NICE \
 		--ulimit nofile=65536:65536 \
 		--ulimit memlock=-1 \
 		cnext
+
+# ── HTTPS — drop cert.pem + key.pem into certs/ ──────────────────────
+gen-cert:
+	sh tools/gen-dev-cert.sh
 
 # =====================================================================
 # Native Linux build — no Docker
@@ -78,12 +84,13 @@ _check-deps:
 	[ -f /usr/include/nghttp2/nghttp2.h ] || missing="$$missing libnghttp2-dev"; \
 	[ -f /usr/include/curl/curl.h ] || [ -f /usr/include/x86_64-linux-gnu/curl/curl.h ] \
 	                                      || missing="$$missing libcurl4-openssl-dev"; \
+	[ -f /usr/include/openssl/ssl.h ]     || missing="$$missing libssl-dev"; \
 	[ -f /usr/include/liburing.h ] || [ -f /usr/local/include/liburing.h ] \
 	                                      || missing="$$missing liburing"; \
 	if [ -n "$$missing" ]; then \
 	  echo "[native] missing deps:$$missing"; \
 	  echo "[native] install with:"; \
-	  echo "    sudo apt install build-essential python3 liblmdb-dev libnghttp2-dev libcurl4-openssl-dev"; \
+	  echo "    sudo apt install build-essential python3 liblmdb-dev libnghttp2-dev libcurl4-openssl-dev libssl-dev"; \
 	  echo "    # liburing 2.6+ — build from source if your distro lacks it:"; \
 	  echo "    #   git clone --depth 1 --branch liburing-2.6 https://github.com/axboe/liburing.git"; \
 	  echo "    #   cd liburing && ./configure --prefix=/usr/local && make && sudo make install && sudo ldconfig"; \
@@ -108,7 +115,8 @@ help:
 	@echo "  make dev-down    stop the dev container"
 	@echo "  make start       production build + run   (Docker, any OS)"
 	@echo "  make native      native build             (Linux only, no Docker)"
+	@echo "  make gen-cert    generate self-signed dev cert into certs/"
 	@echo "  make clean       remove build artifacts"
 	@echo "  make list-pages  show discovered routes"
 
-.PHONY: all clean list-pages dev dev-down start native _check-deps help
+.PHONY: all clean list-pages dev dev-down start native _check-deps gen-cert help

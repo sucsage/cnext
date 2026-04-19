@@ -45,7 +45,7 @@ Verify: `docker run --rm hello-world`
 
 ```bash
 sudo apt install build-essential python3 \
-                 liblmdb-dev libnghttp2-dev libcurl4-openssl-dev
+                 liblmdb-dev libnghttp2-dev libcurl4-openssl-dev libssl-dev
 
 # liburing 2.6+ — build from source if your distro's package is older
 git clone --depth 1 --branch liburing-2.6 https://github.com/axboe/liburing.git
@@ -101,6 +101,7 @@ static void render_card(const char *key, const char *val, void *arg) {
 | `<%inc <stdlib.h> %>` | `#include <stdlib.h>` |
 | `@route /path` | Override the path-derived route (optional) |
 | `@fn funcname` | Generate public `void funcname(PageCtx *ctx)` — no route |
+| `@meta key "value"` | Per-page metadata (`title`, `description`, `og_image`, `canonical`) |
 | `{{children}}` | (in `layout.cxn` only) slot where the page body renders |
 | `<%! ... %>` | C code at file scope (close with `%>` on its own line) |
 | `<% code; %>` | C code inside `render()` |
@@ -128,6 +129,46 @@ One `src/layout.cxn` wraps every page at the `{{children}}` marker — no explic
 ```
 
 If `layout.cxn` is absent, pages render standalone via a weak default in `lib/include/pages.h`.
+
+### Per-page metadata
+
+Declare `@meta` directives at the top of any `page.cxn`:
+
+```
+@meta title       "Blog — cnext"
+@meta description "Latest posts"
+@meta og_image    "/og/blog.png"
+```
+
+The layout picks them up by calling `page_emit_meta_head(ctx)` inside `<head>`:
+
+```
+<head>
+  <meta charset="UTF-8">
+<% page_emit_meta_head(ctx); %>
+  <link rel="stylesheet" href="/style.css">
+</head>
+```
+
+That call emits `<title>` (falling back to `cnext`), `<meta name="description">`, `<link rel="canonical">` and the matching `og:*` tags. Call `page_current_meta()` from custom layout code if you need direct access.
+
+---
+
+## HTTPS
+
+Plaintext HTTP/1.1 + HTTP/2 (h2c) runs on port **8080**. TLS terminates on port **8443** using OpenSSL + kTLS.
+
+Drop `cert.pem` + `key.pem` into a **`certs/`** folder at the project root — the framework loads them at runtime, no rebuild required.
+
+```bash
+make gen-cert            # one-time: writes certs/cert.pem + certs/key.pem (self-signed, 10y)
+make dev                 # TLS listener auto-starts on 8443
+curl -k https://localhost:8443/
+```
+
+Replace the dev cert with a real one by overwriting `certs/cert.pem` + `certs/key.pem`. Override the paths with env vars `CNEXT_TLS_CERT` / `CNEXT_TLS_KEY` if you prefer to keep certs elsewhere.
+
+If no cert is present at startup, TLS is silently skipped — the plaintext listener on 8080 keeps running. The first cut terminates HTTP/1.1 only; HTTP/2-over-TLS is tracked as future work. Compile TLS out entirely with `-DTLS_ENABLED=0` if you want zero OpenSSL linkage.
 
 ---
 
@@ -220,7 +261,7 @@ make dev-down     # stop
 `make start` wraps this — only use it directly if you need custom flags:
 
 ```bash
-docker run --rm -p 8080:8080 \
+docker run --rm -p 8080:8080 -p 8443:8443 \
   -v $(pwd)/data:/app/data \          # persist LMDB data
   --security-opt seccomp=unconfined \ # io_uring syscalls
   --cap-add SYS_NICE \                # IORING_SETUP_SQPOLL

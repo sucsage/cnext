@@ -14,6 +14,7 @@ Syntax:
   <%inc <stdlib.h> %>     → #include <stdlib.h>
   @route /path            → override route ที่ derive จาก path (optional)
   @fn funcname            → public helper (no route, for shared partials)
+  @meta key "value"       → per-page metadata (title, description, og_image, canonical)
   <% c_code; %>           → raw C code ใน render()
   <%! ... %>              → C code ที่ file scope (multi-line, ปิดด้วย %> บรรทัดเดียว)
   {{expr}}                → page_writef(ctx, "%s", expr);
@@ -59,10 +60,13 @@ def process(src_path, dst_path):
     includes = []
     route = derive_route(src_path) if is_page else None
     fn_name = None
+    meta = {}                        # @meta key → C string literal value (already escaped)
     scope_lines = []
     body_lines = []
     in_scope = False
     has_children_marker = False
+
+    META_KEYS = ('title', 'description', 'og_image', 'canonical')
 
     for raw in lines:
         line = raw.rstrip('\n')
@@ -102,6 +106,17 @@ def process(src_path, dst_path):
         m = re.match(r'^\s*@fn\s+(\S+)', line)
         if m:
             fn_name = m.group(1)
+            continue
+
+        # ── @meta key "value" — per-page metadata ────────────────────────
+        m = re.match(r'^\s*@meta\s+(\w+)\s+"(.*)"\s*$', line)
+        if m:
+            key, val = m.group(1), m.group(2)
+            if key not in META_KEYS:
+                print(f'[cxnc] warning: {src_path}: unknown @meta key "{key}" '
+                      f'(known: {", ".join(META_KEYS)})', file=sys.stderr)
+            else:
+                meta[key] = esc(val)
             continue
 
         # ── <% single-line C code %> ─────────────────────────────────────
@@ -148,6 +163,15 @@ def process(src_path, dst_path):
 
     if scope_lines:
         out.extend(scope_lines)
+        out.append('')
+
+    # ── @meta — emit PageMeta struct before the render fn ────────────────
+    if meta and not is_layout and not fn_name:
+        out.append('static const PageMeta _page_meta = {')
+        for key in META_KEYS:
+            if key in meta:
+                out.append(f'    .{key} = "{meta[key]}",')
+        out.append('};')
         out.append('')
 
     if is_layout:
@@ -200,7 +224,12 @@ def process(src_path, dst_path):
 
     if route and not is_layout and not fn_name:
         out.append('__attribute__((constructor))')
-        out.append(f'static void _cxn_page_ctor(void) {{ add_page("GET", "{route}", render); }}')
+        if meta:
+            out.append(f'static void _cxn_page_ctor(void) {{ '
+                       f'add_page_meta("GET", "{route}", render, &_page_meta); }}')
+        else:
+            out.append(f'static void _cxn_page_ctor(void) {{ '
+                       f'add_page("GET", "{route}", render); }}')
         out.append('')
 
     with open(dst_path, 'w', encoding='utf-8') as f:

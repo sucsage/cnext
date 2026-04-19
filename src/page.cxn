@@ -1,3 +1,5 @@
+@meta title       "cnext — Next.js-style SSR in C"
+@meta description "A Next.js-inspired SSR framework in C on io_uring + HTTP/2 + LMDB."
 <div class="docs-layout">
 
   <aside class="docs-sidebar">

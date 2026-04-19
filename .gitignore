@@ -12,6 +12,9 @@ server
 lib_dev/
 Makefile.maintainer
 
+# ── TLS certs — loaded at runtime from certs/, never committed ───────
+certs/
+
 # ── Runtime data — regenerated on each deploy ────────────────────────
 data/
 

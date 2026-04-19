@@ -33,11 +33,34 @@ static inline void page_write_n(PageCtx *ctx, const char *s, size_t n) {
 typedef void (*PageFn)(HttpRequest *req, PageCtx *ctx);
 
 // =====================================================================
-// add_page  — register page (ใช้ได้จากทุกที่)
-// pages_init — เรียกใน main ก่อน start server
+// PageMeta — per-page metadata declared via @meta in .cxn files
 // =====================================================================
-void add_page  (const char *method, const char *route, PageFn fn);
-void pages_init(void);
+typedef struct {
+    const char *title;
+    const char *description;
+    const char *og_image;
+    const char *canonical;
+} PageMeta;
+
+// =====================================================================
+// add_page       — register page without metadata
+// add_page_meta  — register page with optional PageMeta (NULL = no meta)
+// pages_init     — เรียกใน main ก่อน start server
+// =====================================================================
+void add_page     (const char *method, const char *route, PageFn fn);
+void add_page_meta(const char *method, const char *route, PageFn fn,
+                   const PageMeta *meta);
+void pages_init   (void);
+
+// ── Layout helpers ────────────────────────────────────────────────────
+// Returns the active page's PageMeta (or NULL if the page had no @meta).
+// Safe to call from inside the generated app_layout() body.
+const PageMeta *page_current_meta(void);
+
+// Convenience: emit <title> + <meta name="description"> + og:* tags
+// based on the current page's metadata. Falls back to "cnext" as the
+// title when no @meta title was declared.
+void page_emit_meta_head(PageCtx *ctx);
 
 // =====================================================================
 // Layout — generated from src/layout.cxn (Next.js-style)

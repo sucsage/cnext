@@ -1,4 +1,6 @@
 <!-- src/cxn/page.cxn  →  GET /cxn   (route derived from folder path) -->
+@meta title       "Writing .cxn — cnext"
+@meta description "Guide to authoring .cxn templates: directives, helpers, and live examples."
 <%inc <time.h> %>
 <%inc <stdlib.h> %>
 
@@ -14,6 +16,7 @@ static const char *CXN_DIRECTIVES[] = {
     "{{children}}",
     "@route /override",
     "@fn helper_name",
+    "@meta key \"value\"",
     NULL,
 };
 
