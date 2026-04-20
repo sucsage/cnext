@@ -91,11 +91,17 @@ typedef struct {
     // Output — any combination:
     //   out_result set → *out_result = malloc'd FetchResult (fetch_free after)
     //   out + out_size + fields + nfields set → parsed struct written to out
+    //   out_array + out_count + out_size + fields + nfields set → JSON array [{...},...]
+    //     *out_array = malloc'd array of *out_count elements (caller: free(*out_array))
+    //     out_size = sizeof(one element). max_elems caps the array (0 = 4096 default).
     FetchResult      **out_result;
     void              *out;
     size_t             out_size;
     const FetchField  *fields;
     size_t             nfields;
+    void             **out_array;
+    size_t            *out_count;
+    size_t             max_elems;
 } FetchOpts;
 
 // ---------------------------------------------------------------------
@@ -113,6 +119,13 @@ int cxn_fetch(const char *url, const FetchOpts *opts);
 // ---------------------------------------------------------------------
 int cxn_json_parse(const char *body, size_t len, void *out,
                    const FetchField *fields, size_t nfields);
+
+// Parse a top-level JSON array of flat objects. *out_array = malloc'd
+// array (caller frees). max_elems = 0 → default cap of 4096.
+int cxn_json_parse_array(const char *body, size_t len,
+                         const FetchField *fields, size_t nfields,
+                         size_t elem_size, size_t max_elems,
+                         void **out_array, size_t *out_count);
 
 // ---------------------------------------------------------------------
 // Lifecycle (auto-init on first use — usually no need to call)

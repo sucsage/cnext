@@ -3,6 +3,7 @@
 @meta description "Guide to authoring .cxn templates: directives, helpers, and live examples."
 <%inc <time.h> %>
 <%inc <stdlib.h> %>
+<%inc src/components/card_cxn.h %>
 
 <%!
 /* ── File-scope helpers live here. Everything between <%! and %> is
@@ -39,6 +40,7 @@ static void render_directive_row(const char *d, PageCtx *ctx) {
     <a href="#inc"        class="docs-nav-link">&lt;%inc %&gt;</a>
     <a href="#route"      class="docs-nav-link">@route</a>
     <a href="#fn"         class="docs-nav-link">@fn</a>
+    <a href="#components" class="docs-nav-link">Components</a>
     <a href="#layout"     class="docs-nav-link">layout &amp; children</a>
     <div class="docs-nav-group">Patterns</div>
     <a href="#db"         class="docs-nav-link">Loop with db_scan</a>
@@ -167,6 +169,29 @@ static void swatch(PageCtx *ctx, const char *c) {
 &lt;div class="card"&gt;&#123;&#123;title&#125;&#125;&lt;/div&gt;</div>
       <p class="docs-p">Compiles to <code>void render_card(PageCtx *ctx)</code> &mdash; no route, no constructor. Call from any page with <code>&lt;% render_card(ctx); %&gt;</code>.</p>
       <p class="docs-note">You&rsquo;ll need to pass extra data via thread-local state or globals, since <code>@fn</code> functions only receive <code>ctx</code>.</p>
+    </div>
+
+    <!-- ═════════════════════════════════════════════════════════════ -->
+    <div class="docs-section" id="components">
+      <h2 class="docs-h2">Components &mdash; &#64;fn with props</h2>
+      <p class="docs-p">Add a parameter list to <code>&#64;fn</code> and it compiles to a typed function with an extra <code>PageCtx *ctx</code> prepended. <code>cxnc</code> also emits a matching <code>.h</code> so other pages can <code>&lt;%inc&gt;</code> and call it with full gcc type-checking.</p>
+      <div class="code-block">&lt;!-- src/components/card.cxn --&gt;
+&#64;fn Card(const char *title, const char *desc)
+
+&lt;div class="card"&gt;
+  &lt;h3&gt;&#123;&#123;title&#125;&#125;&lt;/h3&gt;
+  &lt;p&gt;&#123;&#123;desc&#125;&#125;&lt;/p&gt;
+&lt;/div&gt;</div>
+      <p class="docs-p">Use from any page:</p>
+      <div class="code-block">&lt;%inc src/components/card_cxn.h %&gt;
+
+&lt;% Card(ctx, "Hello", "This is a card"); %&gt;</div>
+      <p class="docs-sublabel">Live:</p>
+      <div class="demo-box">
+        <% Card(ctx, "cnext", "SSR framework in C"); %>
+        <% Card(ctx, "io_uring", "Single-threaded event loop"); %>
+      </div>
+      <p class="docs-note">For many fields, prefer a props struct: define <code>typedef struct { ... } CardProps;</code> in a <code>&lt;%! %&gt;</code> block and use <code>&#64;fn Card(const CardProps *p)</code>. Call it with a compound literal: <code>Card(ctx, &amp;(CardProps){ .title="X", .desc="Y" });</code>.</p>
     </div>
 
     <!-- ═════════════════════════════════════════════════════════════ -->

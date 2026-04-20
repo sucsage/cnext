@@ -37,6 +37,7 @@ typedef struct H2State H2State;
 // server.c implements this as a static function capturing TLS context
 typedef void (*H2DispatchFn)(int32_t stream_id,
                               const char *method, const char *path,
+                              const char *cookie,
                               const char *body,   size_t body_len,
                               H2State *h2);
 

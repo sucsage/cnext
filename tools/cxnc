@@ -12,6 +12,7 @@ File-based routing (Next.js-style):
 Syntax:
   <%inc db/db.h %>        → #include "db/db.h"
   <%inc <stdlib.h> %>     → #include <stdlib.h>
+  <%inc foo/bar.cxn %>    → #include "foo/bar_cxn.h"   (auto-rewrite)
   @route /path            → override route ที่ derive จาก path (optional)
   @fn funcname            → public helper (no route, for shared partials)
   @meta key "value"       → per-page metadata (title, description, og_image, canonical)
@@ -35,9 +36,11 @@ def esc(s):
 
 def derive_route(src_path):
     """
-    src/page.cxn              → '/'
-    src/blog/page.cxn         → '/blog'
-    src/user/profile/page.cxn → '/user/profile'
+    src/page.cxn                 → '/'
+    src/blog/page.cxn            → '/blog'
+    src/user/profile/page.cxn    → '/user/profile'
+    src/cart/fragment.cxn        → '/cart/fragment'
+    src/fragment.cxn             → '/fragment'
     """
     p = src_path.replace(os.sep, '/')
     if p.startswith('src/'):
@@ -46,6 +49,10 @@ def derive_route(src_path):
         return '/'
     if p.endswith('/page.cxn'):
         return '/' + p[:-len('/page.cxn')]
+    if p == 'fragment.cxn':
+        return '/fragment'
+    if p.endswith('/fragment.cxn'):
+        return '/' + p[:-len('.cxn')]
     return None
 
 
@@ -53,13 +60,15 @@ def process(src_path, dst_path):
     with open(src_path, encoding='utf-8') as f:
         lines = f.readlines()
 
-    basename  = os.path.basename(src_path)
-    is_layout = basename == 'layout.cxn'
-    is_page   = basename == 'page.cxn'
+    basename    = os.path.basename(src_path)
+    is_layout   = basename == 'layout.cxn'
+    is_page     = basename == 'page.cxn'
+    is_fragment = basename == 'fragment.cxn'
 
     includes = []
-    route = derive_route(src_path) if is_page else None
+    route = derive_route(src_path) if (is_page or is_fragment) else None
     fn_name = None
+    fn_args = ''
     meta = {}                        # @meta key → C string literal value (already escaped)
     scope_lines = []
     body_lines = []
@@ -88,12 +97,17 @@ def process(src_path, dst_path):
             continue
 
         # ── <%inc header %> ──────────────────────────────────────────────
+        # <%inc path.cxn %> is rewritten to the generated header
+        # (src/components/card.cxn → src/components/card_cxn.h). The real
+        # file lives under .cnext/, which is already on the include path.
         m = re.match(r'^\s*<%inc\s+(.+?)\s*%>\s*$', line)
         if m:
             val = m.group(1).strip()
             if val.startswith('<'):
                 includes.append(f'#include {val}')
             else:
+                if val.endswith('.cxn'):
+                    val = val[:-len('.cxn')] + '_cxn.h'
                 includes.append(f'#include "{val}"')
             continue
 
@@ -103,10 +117,11 @@ def process(src_path, dst_path):
             route = m.group(1)
             continue
 
-        # ── @fn funcname — public helper, no route ───────────────────────
-        m = re.match(r'^\s*@fn\s+(\S+)', line)
+        # ── @fn Name[(args)] — public helper / component, no route ───────
+        m = re.match(r'^\s*@fn\s+(\w+)\s*(?:\((.*)\))?\s*$', line)
         if m:
             fn_name = m.group(1)
+            fn_args = (m.group(2) or '').strip()
             continue
 
         # ── @meta key "value" — per-page metadata ────────────────────────
@@ -193,6 +208,13 @@ def process(src_path, dst_path):
         out.append('};')
         out.append('')
 
+    frag_name = None
+    if is_fragment and route:
+        # Public symbol for action handlers / internal callers.
+        # /counter/fragment → cxn_fragment_counter_fragment
+        slug = route.lstrip('/').replace('/', '_').replace('-', '_')
+        frag_name = 'cxn_fragment_' + (slug or 'root')
+
     if is_layout:
         if not has_children_marker:
             print(f'[cxnc] warning: {src_path} has no {{{{children}}}} marker — page content will not render',
@@ -200,7 +222,11 @@ def process(src_path, dst_path):
         out.append('void app_layout(HttpRequest *req, PageCtx *ctx, PageFn child) {')
         out.append('    (void)req;')
     elif fn_name:
-        out.append(f'void {fn_name}(PageCtx *ctx) {{')
+        sig_args = f', {fn_args}' if fn_args else ''
+        out.append(f'void {fn_name}(PageCtx *ctx{sig_args}) {{')
+    elif frag_name:
+        out.append(f'void {frag_name}(HttpRequest *req, PageCtx *ctx) {{')
+        out.append('    (void)req;')
     else:
         out.append('static void render(HttpRequest *req, PageCtx *ctx) {')
         out.append('    (void)req;')
@@ -243,7 +269,10 @@ def process(src_path, dst_path):
 
     if route and not is_layout and not fn_name:
         out.append('__attribute__((constructor))')
-        if meta:
+        if is_fragment and frag_name:
+            out.append(f'static void _cxn_page_ctor(void) {{ '
+                       f'add_fragment("GET", "{route}", {frag_name}); }}')
+        elif meta:
             out.append(f'static void _cxn_page_ctor(void) {{ '
                        f'add_page_meta("GET", "{route}", render, &_page_meta); }}')
         else:
@@ -254,10 +283,34 @@ def process(src_path, dst_path):
     with open(dst_path, 'w', encoding='utf-8') as f:
         f.write('\n'.join(out) + '\n')
 
+    # ── Component / fragment header — forward declaration for @fn or fragment.cxn
+    public_decl = None
+    if fn_name:
+        sig_args = f', {fn_args}' if fn_args else ''
+        public_decl = f'void {fn_name}(PageCtx *ctx{sig_args});'
+    elif frag_name:
+        public_decl = f'void {frag_name}(HttpRequest *req, PageCtx *ctx);'
+
+    if public_decl:
+        hdr_path = dst_path[:-2] + '.h' if dst_path.endswith('.c') else dst_path + '.h'
+        guard = re.sub(r'[^A-Z0-9]', '_', os.path.basename(hdr_path).upper())
+        hdr = ['/* AUTO-GENERATED by tools/cxnc — do not edit */',
+               f'#ifndef {guard}',
+               f'#define {guard}',
+               '#include "pages.h"']
+        hdr.extend(includes)
+        hdr.append(public_decl)
+        hdr.append(f'#endif /* {guard} */')
+        hdr.append('')
+        with open(hdr_path, 'w', encoding='utf-8') as f:
+            f.write('\n'.join(hdr))
+
     if is_layout:
         label = 'layout'
     elif fn_name:
         label = f'fn={fn_name}'
+    elif is_fragment and route:
+        label = f'fragment={route}'
     elif route:
         label = f'route={route}'
     else:

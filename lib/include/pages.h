@@ -50,6 +50,12 @@ typedef struct {
 void add_page     (const char *method, const char *route, PageFn fn);
 void add_page_meta(const char *method, const char *route, PageFn fn,
                    const PageMeta *meta);
+
+// Register a fragment — renders WITHOUT the global layout wrap.
+// Intended for HTMX-style endpoints that return an HTML fragment to
+// swap into a host page. File-based routing: src/foo/fragment.cxn → /foo/fragment.
+void add_fragment(const char *method, const char *route, PageFn fn);
+
 void pages_init   (void);
 
 // ── Layout helpers ────────────────────────────────────────────────────

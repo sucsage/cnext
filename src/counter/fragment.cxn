@@ -1,0 +1,16 @@
+<%inc session.h %>
+<%inc <stdlib.h> %>
+
+<%!
+/* Render current counter value from session */
+%>
+
+<% char *_cur = session_get(req, "count"); %>
+<% int n = _cur ? atoi(_cur) : 0; %>
+<% free(_cur); %>
+
+<div id="counter">
+  <% page_writef(ctx, "<p>count: <strong>%d</strong></p>", n); %>
+  <button hx-post="/action/counter/inc"   hx-target="#counter" hx-swap="outerHTML">+1</button>
+  <button hx-post="/action/counter/reset" hx-target="#counter" hx-swap="outerHTML">reset</button>
+</div>

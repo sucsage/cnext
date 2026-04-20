@@ -12,7 +12,7 @@
     <a href="/cxn" class="logo">cxn</a>
   </nav>
   <main>
-{{children}}
+    {{children}}
   </main>
   <footer class="footer">
     <p>Powered by <strong>C + io_uring</strong> &mdash; SSR like Next.js</p>

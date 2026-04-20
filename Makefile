@@ -1,5 +1,5 @@
 CC          = gcc
-CFLAGS      = -O3 -march=native -Wall -Wextra -pthread -I. -Ilib/include -I/usr/local/include
+CFLAGS      = -O3 -march=native -Wall -Wextra -pthread -I. -I.cnext -Ilib/include -I/usr/local/include
 LDFLAGS     = -L/usr/local/lib -luring -llmdb -lnghttp2 -lcurl -lssl -lcrypto
 TARGET      = server
 LIB_A       = lib/libcnext.a

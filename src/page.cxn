@@ -16,6 +16,9 @@
     <div class="docs-nav-group">Data</div>
     <a href="#database"   class="docs-nav-link">Database</a>
     <a href="#fetch"      class="docs-nav-link">HTTP Fetch</a>
+    <div class="docs-nav-group">State</div>
+    <a href="#sessions"   class="docs-nav-link">Sessions</a>
+    <a href="#fragments"  class="docs-nav-link">Fragments + HTMX</a>
   </aside>
 
   <div class="docs-content">
@@ -211,7 +214,50 @@ cxn_fetch(url, &amp;(FetchOpts){ .method = "POST", .body = json, .async = 1 });<
         <tr><td><code>async</code></td><td>Fire-and-forget; returns 0 immediately, <code>cb</code> runs in worker</td></tr>
         <tr><td><code>out_result</code></td><td><code>FetchResult**</code> — raw body + status (caller <code>fetch_free</code>s)</td></tr>
         <tr><td><code>out</code> / <code>fields</code></td><td>Parse JSON into a struct; cache stores the parsed binary (hit path = <code>memcpy</code>)</td></tr>
+        <tr><td><code>out_array</code> / <code>out_count</code> / <code>max_elems</code></td><td>Parse a top-level JSON array <code>[{...}, ...]</code> into a contiguous malloc'd <code>T[]</code>; cache stores the packed blob.</td></tr>
       </table>
+    </div>
+
+    <div class="docs-section" id="sessions">
+      <h2 class="docs-h2">Sessions</h2>
+      <p class="docs-p">Cookie-backed server-side state. The framework allocates a 32-hex <code>cnext_sid</code> on first access and pins it with a <code>Set-Cookie</code> response header (HttpOnly, SameSite=Lax, Max-Age=1d). Values live in <code>db_hot</code> under <code>sess:&lt;sid&gt;</code> — RAM-only, not shared across restarts.</p>
+      <div class="code-block">#include "session.h"
+
+const char *sid = session_id(req);           // read or allocate
+char *name = session_get(req, "name");       // caller free()s
+session_set(req, "name", "alice", 0);        // 0 = default 1-day TTL
+session_del(req, "name");</div>
+      <p class="docs-note">For durable state, mirror to <code>db_cold</code> yourself &mdash; the session store is deliberately hot-only. Demo at <a href="/counter">/counter</a>.</p>
+    </div>
+
+    <div class="docs-section" id="fragments">
+      <h2 class="docs-h2">Fragments + HTMX</h2>
+      <p class="docs-p">A <code>fragment.cxn</code> file renders <strong>without</strong> the root layout and exposes a public symbol so action handlers can re-render it directly. Pair with HTMX (loaded from CDN) to swap HTML in-place &mdash; no client bundler, no JSON API.</p>
+      <div class="code-block">&lt;!-- src/counter/fragment.cxn --&gt;
+&lt;%inc session.h %&gt;
+&lt;%inc &lt;stdlib.h&gt; %&gt;
+
+&lt;% char *cur = session_get(req, "count"); %&gt;
+&lt;% int n = cur ? atoi(cur) : 0; free(cur); %&gt;
+
+&lt;div id="counter"&gt;
+  &lt;% page_writef(ctx, "&lt;p&gt;count: &lt;strong&gt;%d&lt;/strong&gt;&lt;/p&gt;", n); %&gt;
+  &lt;button hx-post="/action/counter/inc"   hx-target="#counter" hx-swap="outerHTML"&gt;+1&lt;/button&gt;
+  &lt;button hx-post="/action/counter/reset" hx-target="#counter" hx-swap="outerHTML"&gt;reset&lt;/button&gt;
+&lt;/div&gt;</div>
+      <p class="docs-p">cxnc emits a matching header so the action handler can call the fragment directly:</p>
+      <div class="code-block">// src/counter/action.c
+#include "src/counter/fragment_cxn.h"  // auto-generated from fragment.cxn
+
+static void action(HttpRequest *req, int socket_fd) {
+    /* mutate session_set / session_del … */
+    char buf[4096];
+    PageCtx ctx = { .buf = buf, .len = 0, .cap = sizeof(buf) };
+    cxn_fragment_counter_fragment(req, &amp;ctx);
+    ctx.buf[ctx.len] = '\0';
+    send_response(socket_fd, 200, "OK", "text/html; charset=utf-8", ctx.buf);
+}</div>
+      <p class="docs-note">Generated symbol is <code>cxn_fragment_&lt;route-slug&gt;</code> (<code>/counter/fragment</code> &rarr; <code>cxn_fragment_counter_fragment</code>). Hosting page must include <code>&lt;script src="https://unpkg.com/htmx.org@1.9.12" defer&gt;&lt;/script&gt;</code>.</p>
     </div>
 
   </div>

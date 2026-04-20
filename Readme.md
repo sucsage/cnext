@@ -101,6 +101,7 @@ static void render_card(const char *key, const char *val, void *arg) {
 | `<%inc <stdlib.h> %>` | `#include <stdlib.h>` |
 | `@route /path` | Override the path-derived route (optional) |
 | `@fn funcname` | Generate public `void funcname(PageCtx *ctx)` — no route |
+| `@fn Name(args)` | Component — generate `void Name(PageCtx *ctx, args)` + matching `.h` |
 | `@meta key "value"` | Per-page metadata (`title`, `description`, `og_image`, `canonical`) |
 | `{{children}}` | (in `layout.cxn` only) slot where the page body renders |
 | `<%! ... %>` | C code at file scope (close with `%>` on its own line) |
@@ -129,6 +130,34 @@ One `src/layout.cxn` wraps every page at the `{{children}}` marker — no explic
 ```
 
 If `layout.cxn` is absent, pages render standalone via a weak default in `lib/include/pages.h`.
+
+### Components — `@fn Name(args)`
+
+Reusable partials with typed props. Write a `.cxn` file with `@fn Name(args...)`; cxnc emits a `.c` definition **and** a `.h` forward declaration. Any page that `<%inc>`s the header can call the component with full gcc type-checking.
+
+```
+<!-- src/components/card.cxn -->
+@fn Card(const char *title, const char *desc)
+
+<div class="card">
+  <h3>{{title}}</h3>
+  <p>{{desc}}</p>
+</div>
+```
+
+```
+<!-- src/some/page.cxn -->
+<%inc src/components/card.cxn %>
+
+<% Card(ctx, "Hello", "This is a card"); %>
+<% Card(ctx, "Next",  "Another one"); %>
+```
+
+Notes:
+- Components live anywhere; `src/components/**/*.cxn` is a convention, not a requirement. They don't register a route.
+- `ctx` is always the first argument — `cxnc` prepends `PageCtx *ctx` to the signature you write.
+- For many fields, prefer a props struct: define `typedef struct { ... } CardProps;` in a `<%! %>` block and use `@fn Card(const CardProps *p)`. Call with a compound literal: `Card(ctx, &(CardProps){ .title="X", .desc="Y" });`.
+- `<%inc foo/bar.cxn %>` is auto-rewritten to `#include "foo/bar_cxn.h"` — cxnc generates the header into `.cnext/` and the Makefile adds `-I.cnext` so the include resolves. Write `.cxn` paths at the call site; you never touch `_cxn.h` by hand.
 
 ### Per-page metadata
 
@@ -339,6 +368,30 @@ cxn_json_parse(body, len, &t, TODO_FIELDS, TODO_NFIELDS);
 
 Field types: `F_STR` (char array in-struct), `F_INT`, `F_I64`, `F_F64`, `F_BOOL`. Nested JSON objects/arrays are skipped — declare only the top-level keys you need. One-pass tokenizer, zero heap allocation.
 
+### Arrays — `[{...}, {...}]`
+
+For endpoints that return a top-level JSON array, pass `out_array` + `out_count` instead of `out`. cxn_fetch parses each element into the same struct shape, mallocs a contiguous array, and caches the packed binary blob — hit path is still zero-reparse.
+
+```c
+Todo *todos = NULL;
+size_t n = 0;
+int ok = cxn_fetch("https://jsonplaceholder.typicode.com/todos", &(FetchOpts){
+    .ttl       = 60,
+    .wait_ms   = 500,
+    .out_array = (void **)&todos,
+    .out_count = &n,
+    .max_elems = 200,                      // cap; defaults to 4096
+    .fields    = TODO_FIELDS, .nfields = TODO_NFIELDS,
+});
+if (ok) {
+    for (size_t i = 0; i < n; i++)
+        page_writef(ctx, "<li>#%d — %s</li>", todos[i].id, todos[i].title);
+    free(todos);
+}
+```
+
+Standalone: `cxn_json_parse_array(body, len, fields, nfields, sizeof(T), max, &out, &count)`.
+
 ### Performance notes
 
 - Internal thread pool (4 workers by default) + 1024-slot hash cache (FNV-1a, open-addressing)
@@ -347,6 +400,78 @@ Field types: `F_STR` (char array in-struct), `F_INT`, `F_I64`, `F_F64`, `F_BOOL`
 - In-flight dedup: 1000 concurrent requests for the same URL fire **one** upstream call
 - Stale-while-revalidate: users never block on a refresh — they always get fresh or stale-served data while the bg worker refills the cache
 - `wait_ms>0` uses a `pthread_cond_timedwait` on a global condvar broadcast by workers on cache store — no busy-polling
+
+---
+
+## Sessions
+
+Cookie-backed server-side state. On first access, the framework allocates a 32-hex SID and pins it with a `Set-Cookie: cnext_sid=...; HttpOnly; SameSite=Lax; Max-Age=86400` response header. Values live in `db_hot` under the `sess:<sid>` namespace — single-process RAM, not shared across restarts.
+
+```c
+#include "session.h"
+
+const char *sid = session_id(req);                    // read or allocate
+char *name = session_get(req, "name");                // caller free()s
+session_set(req, "name", "alice", 0);                 // 0 = default 1-day TTL
+session_del(req, "name");
+```
+
+- `session_id` is stable within a request (TLS-cached on the cookie string) and across requests (cookie round-trip).
+- `session_set` accepts a per-key TTL in seconds; `0` means default. Values evict on hot-cache pressure.
+- For durable state, mirror to `db_cold` yourself — the session store is deliberately RAM-only.
+
+Demo: [src/counter/page.cxn](src/counter/page.cxn) + [src/counter/fragment.cxn](src/counter/fragment.cxn) at `/counter`.
+
+---
+
+## Fragments — `fragment.cxn` + HTMX
+
+A `fragment.cxn` renders **without** the root layout and exposes a public symbol so action handlers can re-render it directly. Pair with HTMX for reactive-lite swaps — no client bundler, no JSON API, just HTML over POST.
+
+```
+src/counter/
+  page.cxn              → GET /counter      (full page, includes HTMX from CDN)
+  fragment.cxn          → GET /counter/fragment
+  action.c              → POST /action/counter/{inc,reset}
+```
+
+The fragment file:
+
+```
+<!-- src/counter/fragment.cxn -->
+<%inc session.h %>
+<%inc <stdlib.h> %>
+
+<% char *cur = session_get(req, "count"); %>
+<% int n = cur ? atoi(cur) : 0; free(cur); %>
+
+<div id="counter">
+  <% page_writef(ctx, "<p>count: <strong>%d</strong></p>", n); %>
+  <button hx-post="/action/counter/inc"   hx-target="#counter" hx-swap="outerHTML">+1</button>
+  <button hx-post="/action/counter/reset" hx-target="#counter" hx-swap="outerHTML">reset</button>
+</div>
+```
+
+cxnc emits a matching header so the action can call the fragment directly:
+
+```c
+// src/counter/action.c
+#include "src/counter/fragment_cxn.h"   // auto-generated header (from fragment.cxn)
+
+static void action(HttpRequest *req, int socket_fd) {
+    /* mutate session_set/session_del … */
+    char buf[4096];
+    PageCtx ctx = { .buf = buf, .len = 0, .cap = sizeof(buf) };
+    cxn_fragment_counter_fragment(req, &ctx);
+    ctx.buf[ctx.len] = '\0';
+    send_response(socket_fd, 200, "OK", "text/html; charset=utf-8", ctx.buf);
+}
+```
+
+Conventions:
+- Generated symbol is `cxn_fragment_<route-slug>` (`/counter/fragment` → `cxn_fragment_counter_fragment`).
+- Fragments skip `app_layout` — only the fragment's own HTML is sent. Hosting page includes `<script src="https://unpkg.com/htmx.org@1.9.12" defer></script>`.
+- Action handlers return the fragment HTML (200, `text/html`); HTMX swaps it at `hx-target`.
 
 ---
 

@@ -53,4 +53,11 @@ void send_redirect(int socket_fd, const char *location);
 // รองรับ URL-decoding (%XX และ + → space)
 void parse_form(const char *body, const char *key, char *out, size_t out_len);
 
+// Inject a response header line (e.g. "Set-Cookie: sid=abc; Path=/\r\n").
+// Must include trailing "\r\n". Idempotent within one response.
+// Cleared automatically after send_response / send_redirect.
+void        response_add_header         (const char *line);
+const char *response_extra_headers      (size_t *len_out);
+void        response_clear_extra_headers(void);
+
 #endif // SERVER_H

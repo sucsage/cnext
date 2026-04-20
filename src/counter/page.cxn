@@ -1,0 +1,16 @@
+@meta title       "Counter — HTMX demo"
+@meta description "Click-to-increment counter backed by server-side session state."
+
+<%inc src/counter/fragment.cxn %>
+
+<script src="https://unpkg.com/htmx.org@1.9.12" defer></script>
+
+<div class="docs-content">
+  <h1>Counter</h1>
+  <p>State lives in the server session (cookie → <code>db_hot</code>). The fragment below is re-rendered and swapped by HTMX on each click — no full page reload.</p>
+
+  <% cxn_fragment_counter_fragment(req, ctx); %>
+
+  <hr>
+  <p class="docs-note">First render is pure SSR (works with JS disabled — buttons POST as plain forms if you swap <code>hx-post</code> for a regular form).</p>
+</div>
